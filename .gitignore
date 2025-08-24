@@ -135,3 +135,5 @@ dmypy.json
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+.mcp.json# MCP Configuration with API keys - NOT FOR GIT\n.mcp.json\n
