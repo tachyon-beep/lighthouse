@@ -1,0 +1,30 @@
+"""Lighthouse Event Store - Secure, high-performance event sourcing foundation."""
+
+from .store import EventStore, EventStoreError
+from .models import (
+    Event, EventType, EventBatch, EventFilter, EventQuery,
+    QueryResult, SystemHealth, SnapshotMetadata
+)
+from .id_generator import EventID, generate_event_id, set_node_id, reset_generator
+from .auth import (
+    SimpleAuthenticator, Authorizer, AgentIdentity, AgentRole, Permission,
+    AuthenticationError, AuthorizationError, create_system_authenticator
+)
+from .validation import (
+    PathValidator, InputValidator, ResourceLimiter, SecurityError
+)
+
+__all__ = [
+    # Core event store
+    "EventStore", "EventStoreError",
+    # Event models
+    "Event", "EventType", "EventBatch", "EventFilter", "EventQuery", 
+    "QueryResult", "SystemHealth", "SnapshotMetadata",
+    # Event ID generation
+    "EventID", "generate_event_id", "set_node_id", "reset_generator",
+    # Authentication & Authorization
+    "SimpleAuthenticator", "Authorizer", "AgentIdentity", "AgentRole", "Permission",
+    "AuthenticationError", "AuthorizationError", "create_system_authenticator",
+    # Security & Validation
+    "PathValidator", "InputValidator", "ResourceLimiter", "SecurityError"
+]
