@@ -30,11 +30,49 @@ class EventType(str, Enum):
     SHADOW_CREATED = "shadow_created"
     SHADOW_DELETED = "shadow_deleted"
     
+    # File operations (from Bridge)
+    FILE_CREATED = "file_created"
+    FILE_MODIFIED = "file_modified"
+    FILE_DELETED = "file_deleted"
+    FILE_MOVED = "file_moved"
+    FILE_COPIED = "file_copied"
+    
+    # Directory operations (from Bridge)
+    DIRECTORY_CREATED = "directory_created"
+    DIRECTORY_DELETED = "directory_deleted"
+    DIRECTORY_MOVED = "directory_moved"
+    
+    # Validation operations (from Bridge)
+    VALIDATION_REQUEST_SUBMITTED = "validation_request_submitted"
+    VALIDATION_POLICY_APPLIED = "validation_policy_applied"
+    VALIDATION_ESCALATED_TO_EXPERT = "validation_escalated_to_expert"
+    VALIDATION_DECISION_MADE = "validation_decision_made"
+    
+    # Agent session events (from Bridge)
+    AGENT_SESSION_STARTED = "agent_session_started"
+    AGENT_SESSION_ENDED = "agent_session_ended"
+    EXPERT_AGENT_SUMMONED = "expert_agent_summoned"
+    EXPERT_AGENT_RESPONDED = "expert_agent_responded"
+    
+    # Pair programming events (from Bridge)
+    PAIR_SESSION_STARTED = "pair_session_started"
+    PAIR_SESSION_ENDED = "pair_session_ended"
+    PAIR_SUGGESTION_MADE = "pair_suggestion_made"
+    PAIR_SUGGESTION_ACCEPTED = "pair_suggestion_accepted"
+    PAIR_SUGGESTION_REJECTED = "pair_suggestion_rejected"
+    
+    # Shadow annotations (from Bridge)
+    SHADOW_ANNOTATION_CREATED = "shadow_annotation_created"
+    SHADOW_ANNOTATION_UPDATED = "shadow_annotation_updated"
+    SHADOW_ANNOTATION_DELETED = "shadow_annotation_deleted"
+    
     # System events
     SYSTEM_STARTED = "system_started"
     SYSTEM_SHUTDOWN = "system_shutdown"
     DEGRADATION_TRIGGERED = "degradation_triggered"
     RECOVERY_COMPLETED = "recovery_completed"
+    PROJECT_INITIALIZED = "project_initialized"
+    BACKUP_CREATED = "backup_created"
     
     # Snapshot events
     SNAPSHOT_CREATED = "snapshot_created"
@@ -98,6 +136,49 @@ class Event(BaseModel):
         """Get approximate event size in bytes."""
         return self.calculate_size_bytes()
     
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert event to dictionary for serialization (Bridge compatibility)"""
+        return {
+            'event_id': str(self.event_id),
+            'event_type': self.event_type.value,
+            'aggregate_id': self.aggregate_id,
+            'aggregate_type': self.aggregate_type,
+            'sequence': self.sequence,
+            'data': self.data,
+            'metadata': self.metadata,
+            'timestamp': self.timestamp.isoformat(),
+            'source_agent': self.source_agent,
+            'source_component': self.source_component,
+            'correlation_id': str(self.correlation_id) if self.correlation_id else None,
+            'causation_id': str(self.causation_id) if self.causation_id else None,
+            'schema_version': self.schema_version
+        }
+    
+    def is_file_operation(self) -> bool:
+        """Check if this is a file operation event (Bridge compatibility)"""
+        return self.event_type in [
+            EventType.FILE_CREATED,
+            EventType.FILE_MODIFIED,
+            EventType.FILE_DELETED,
+            EventType.FILE_MOVED,
+            EventType.FILE_COPIED
+        ]
+    
+    def is_validation_operation(self) -> bool:
+        """Check if this is a validation operation event (Bridge compatibility)"""
+        return self.event_type in [
+            EventType.VALIDATION_REQUEST_SUBMITTED,
+            EventType.VALIDATION_POLICY_APPLIED,
+            EventType.VALIDATION_ESCALATED_TO_EXPERT,
+            EventType.VALIDATION_DECISION_MADE
+        ]
+    
+    def get_file_path(self) -> Optional[str]:
+        """Get file path from file operation events (Bridge compatibility)"""
+        if self.is_file_operation():
+            return self.data.get('path') or self.data.get('file_path')
+        return None
+    
     def to_msgpack(self) -> bytes:
         """Serialize event to MessagePack for storage."""
         data = self.model_dump(exclude_unset=True)
@@ -124,6 +205,7 @@ class EventFilter(BaseModel):
     
     # Basic filters
     event_types: Optional[List[EventType]] = None
+    exclude_event_types: Optional[List[EventType]] = None
     aggregate_ids: Optional[List[str]] = None
     aggregate_types: Optional[List[str]] = None
     source_agents: Optional[List[str]] = None
@@ -142,6 +224,88 @@ class EventFilter(BaseModel):
     # Data filters (simple key-value matching)
     data_contains: Optional[Dict[str, Any]] = None
     metadata_contains: Optional[Dict[str, Any]] = None
+    
+    # Bridge compatibility filters
+    agent_ids: Optional[List[str]] = None
+    agent_types: Optional[List[str]] = None
+    session_ids: Optional[List[str]] = None
+    metadata_filter: Optional[Dict[str, Any]] = None
+    correlation_ids: Optional[List[UUID]] = None
+    file_paths: Optional[List[str]] = None
+    file_path_patterns: Optional[List[str]] = None
+    
+    # Pagination
+    limit: Optional[int] = None
+    offset: Optional[int] = 0
+    
+    def matches_event(self, event: Event) -> bool:
+        """Check if event matches this filter (Bridge compatibility)"""
+        
+        # Event type filtering
+        if self.event_types and event.event_type not in self.event_types:
+            return False
+        
+        if self.exclude_event_types and event.event_type in self.exclude_event_types:
+            return False
+        
+        # Aggregate filtering
+        if self.aggregate_ids and event.aggregate_id not in self.aggregate_ids:
+            return False
+        
+        # Time filtering
+        if self.after_timestamp and event.timestamp < self.after_timestamp:
+            return False
+        
+        if self.before_timestamp and event.timestamp > self.before_timestamp:
+            return False
+        
+        if self.after_sequence and (event.sequence is None or event.sequence <= self.after_sequence):
+            return False
+        
+        if self.before_sequence and (event.sequence is None or event.sequence >= self.before_sequence):
+            return False
+        
+        # Agent filtering (Bridge compatibility)
+        agent_id = event.source_agent or event.metadata.get('agent_id')
+        if self.agent_ids and agent_id not in self.agent_ids:
+            return False
+        
+        if self.agent_types and event.metadata.get('agent_type') not in self.agent_types:
+            return False
+        
+        session_id = event.metadata.get('session_id')
+        if self.session_ids and session_id not in self.session_ids:
+            return False
+        
+        # Metadata filtering
+        if self.metadata_filter:
+            for key, expected_value in self.metadata_filter.items():
+                if key not in event.metadata or event.metadata[key] != expected_value:
+                    return False
+        
+        # Correlation filtering
+        if self.correlation_ids and event.correlation_id not in self.correlation_ids:
+            return False
+        
+        # File path filtering
+        if self.file_paths or self.file_path_patterns:
+            file_path = event.get_file_path()
+            if not file_path:
+                return False
+            
+            if self.file_paths and file_path not in self.file_paths:
+                return False
+            
+            if self.file_path_patterns:
+                import fnmatch
+                pattern_match = any(
+                    fnmatch.fnmatch(file_path, pattern) 
+                    for pattern in self.file_path_patterns
+                )
+                if not pattern_match:
+                    return False
+        
+        return True
 
 
 class EventQuery(BaseModel):

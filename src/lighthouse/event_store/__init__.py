@@ -13,6 +13,9 @@ from .auth import (
 from .validation import (
     PathValidator, InputValidator, ResourceLimiter, SecurityError
 )
+from .api import EventStoreAPI, create_api_server, run_server
+from .replay import EventReplayEngine, ReplayError, reconstruct_aggregate_state, get_historical_snapshot
+from .snapshots import SnapshotManager, SnapshotError, AutoSnapshotManager
 
 __all__ = [
     # Core event store
@@ -26,5 +29,11 @@ __all__ = [
     "SimpleAuthenticator", "Authorizer", "AgentIdentity", "AgentRole", "Permission",
     "AuthenticationError", "AuthorizationError", "create_system_authenticator",
     # Security & Validation
-    "PathValidator", "InputValidator", "ResourceLimiter", "SecurityError"
+    "PathValidator", "InputValidator", "ResourceLimiter", "SecurityError",
+    # HTTP/WebSocket API
+    "EventStoreAPI", "create_api_server", "run_server",
+    # Event Replay
+    "EventReplayEngine", "ReplayError", "reconstruct_aggregate_state", "get_historical_snapshot",
+    # Snapshot Management
+    "SnapshotManager", "SnapshotError", "AutoSnapshotManager"
 ]

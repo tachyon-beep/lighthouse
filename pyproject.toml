@@ -72,6 +72,7 @@ Issues = "https://github.com/yourusername/lighthouse/issues"
 [project.scripts]
 lighthouse = "lighthouse.server:main"  # Legacy MCP server
 lighthouse-event-store = "lighthouse.event_store.store:main"  # Event Store CLI
+lighthouse-api = "lighthouse.event_store.api:main"  # HTTP/WebSocket API server
 
 [tool.setuptools.packages.find]
 where = ["src"]
