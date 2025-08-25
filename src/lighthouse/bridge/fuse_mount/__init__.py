@@ -21,14 +21,17 @@ Features:
 - Integration with AST anchoring system
 """
 
-from .filesystem import LighthouseFUSE
-from .operations import FUSEOperations
-from .virtual_files import VirtualFileSystem
+from .complete_lighthouse_fuse import CompleteLighthouseFUSE
 from .mount_manager import FUSEMountManager
+from .authentication import FUSEAuthenticationManager, FUSEAuthenticationContext
+
+# For backward compatibility
+LighthouseFUSE = CompleteLighthouseFUSE
 
 __all__ = [
-    'LighthouseFUSE',
-    'FUSEOperations', 
-    'VirtualFileSystem',
-    'FUSEMountManager'
+    'CompleteLighthouseFUSE',
+    'LighthouseFUSE',  # Backward compatibility
+    'FUSEMountManager',
+    'FUSEAuthenticationManager',
+    'FUSEAuthenticationContext'
 ]

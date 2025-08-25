@@ -73,19 +73,23 @@ class PathValidator:
             if re.search(pattern, path, re.IGNORECASE):
                 raise SecurityError(f"Dangerous path pattern detected: {path}")
         
-        # Convert to absolute path
+        # Convert to absolute path and resolve all symbolic links to prevent symlink attacks
         try:
             abs_path = os.path.abspath(path)
+            # Critical security fix: resolve symbolic links to prevent bypass
+            resolved_path = os.path.realpath(abs_path)
         except (OSError, ValueError) as e:
             raise SecurityError(f"Invalid path: {path}") from e
         
-        # Check if within allowed base directories
+        # Check if resolved path is within allowed base directories
         path_is_allowed = False
         for allowed_base in self.allowed_base_dirs:
             try:
+                # Resolve the base directory as well to prevent symlink bypass
+                resolved_base = os.path.realpath(allowed_base)
                 # Use os.path.commonpath to check containment
-                common = os.path.commonpath([abs_path, allowed_base])
-                if common == allowed_base:
+                common = os.path.commonpath([resolved_path, resolved_base])
+                if common == resolved_base:
                     path_is_allowed = True
                     break
             except ValueError:
@@ -93,9 +97,10 @@ class PathValidator:
                 continue
         
         if not path_is_allowed:
-            raise SecurityError(f"Path outside allowed directories: {path}")
+            raise SecurityError(f"Path traversal attempt blocked: {path} resolves to {resolved_path}")
         
-        return Path(abs_path)
+        # Return the resolved path to prevent symlink attacks
+        return Path(resolved_path)
     
     def validate_directory(self, path: str) -> Path:
         """Validate directory path and ensure it exists or can be created safely.

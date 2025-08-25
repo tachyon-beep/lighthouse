@@ -27,11 +27,11 @@ except ImportError:
     FUSE_AVAILABLE = False
 
 from .complete_lighthouse_fuse import CompleteLighthouseFUSE
-from ..aggregates.project_aggregate import ProjectAggregate
-from ..coordination.ast_anchor_manager import ASTAnchorManager
-from ..streams.event_stream import EventStreamManager
+from ..event_store.project_aggregate import ProjectAggregate
+from ..ast_anchoring.anchor_manager import ASTAnchorManager
+from ..event_store.event_stream import EventStream
 from ...event_store import EventStore
-from ...event_store.time_travel import TimeTravelDebugger
+from ..event_store.time_travel import TimeTravelDebugger
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class FUSEMountManager:
                  event_store: EventStore,
                  project_aggregate: ProjectAggregate,
                  ast_anchor_manager: ASTAnchorManager,
-                 event_stream_manager: EventStreamManager,
+                 event_stream_manager: EventStream,
                  mount_point: str = "/mnt/lighthouse/project",
                  foreground: bool = False,
                  allow_other: bool = True):
@@ -77,12 +77,15 @@ class FUSEMountManager:
         # Initialize time travel debugger
         self.time_travel_debugger = TimeTravelDebugger(event_store)
         
-        # Create complete FUSE filesystem
+        # Create complete FUSE filesystem with authentication
+        import secrets
+        auth_secret = secrets.token_hex(32)  # Generate secure auth secret
         self.filesystem = CompleteLighthouseFUSE(
             project_aggregate=project_aggregate,
             time_travel_debugger=self.time_travel_debugger,
             event_stream=event_stream_manager,
-            ast_anchor_manager=ast_anchor_manager
+            ast_anchor_manager=ast_anchor_manager,
+            auth_secret=auth_secret
         )
         
         self.mount_point = Path(mount_point)
@@ -520,7 +523,7 @@ async def initialize_fuse_mount(bridge_components: dict) -> FUSEMountManager:
         event_store=bridge_components['event_store'],
         project_aggregate=bridge_components['project_aggregate'],
         ast_anchor_manager=bridge_components['ast_anchor_manager'],
-        event_stream_manager=bridge_components['event_stream_manager']
+        event_stream_manager=bridge_components['event_stream']
     )
     
     return mount_manager

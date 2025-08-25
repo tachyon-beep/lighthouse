@@ -8,6 +8,8 @@ enabling Claude Code to interact with the secure event-sourced foundation.
 
 import asyncio
 import json
+import os
+import secrets
 import sys
 import tempfile
 import traceback
@@ -48,7 +50,7 @@ class LighthouseEventStoreMCP:
         self.store = EventStore(
             data_dir=self.temp_dir,
             allowed_base_dirs=[self.temp_dir, "/tmp"],
-            auth_secret="lighthouse-mcp-secret-change-in-production"
+            auth_secret=os.environ.get('LIGHTHOUSE_MCP_SECRET') or secrets.token_urlsafe(32)
         )
         await self.store.initialize()
         

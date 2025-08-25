@@ -6,20 +6,74 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 import uvicorn
 
+# Create a simple middleware class instead
+class BaseHTTPMiddleware:
+    def __init__(self, app):
+        self.app = app
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            request = Request(scope, receive)
+            response = await self.dispatch(request, lambda req: self.app(scope, receive, send))
+            return response
+        else:
+            await self.app(scope, receive, send)
+
 from .store import EventStore, EventStoreError
 from .models import Event, EventType, EventQuery, EventFilter, EventBatch, QueryResult
 from .auth import AgentIdentity, Permission, AuthenticationError, AuthorizationError
+from ..bridge.security.rate_limiter import get_global_rate_limiter, RateLimitError
 
 logger = logging.getLogger(__name__)
 
 # Security
 security = HTTPBearer()
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Middleware for DoS protection and rate limiting."""
+    
+    def __init__(self, app, rate_limiter=None):
+        super().__init__(app)
+        self.rate_limiter = rate_limiter or get_global_rate_limiter()
+    
+    async def dispatch(self, request: Request, call_next):
+        """Apply rate limiting to all requests."""
+        # Extract client identifier from request
+        client_id = self._get_client_id(request)
+        
+        try:
+            # Check rate limit
+            self.rate_limiter.check_rate_limit(client_id)
+            
+            # Process request
+            response = await call_next(request)
+            return response
+            
+        except RateLimitError as e:
+            logger.warning(f"Rate limit exceeded for client {client_id}: {str(e)}")
+            raise HTTPException(status_code=429, detail=str(e))
+    
+    def _get_client_id(self, request: Request) -> str:
+        """Extract client ID from request."""
+        # Try to get agent ID from headers
+        agent_id = request.headers.get('x-agent-id')
+        if agent_id:
+            return f"agent:{agent_id}"
+        
+        # Fall back to IP address
+        client_ip = request.client.host if request.client else "unknown"
+        forwarded_for = request.headers.get('x-forwarded-for')
+        if forwarded_for:
+            client_ip = forwarded_for.split(',')[0].strip()
+        
+        return f"ip:{client_ip}"
 
 # Request/Response models
 class EventRequest(BaseModel):
@@ -77,6 +131,10 @@ class EventStoreAPI:
             version="1.0.0"
         )
         self.websocket_connections: Set[WebSocket] = set()
+        self.rate_limiter = get_global_rate_limiter()
+        
+        # Add rate limiting middleware
+        self.app.add_middleware(RateLimitMiddleware)
         
         self._setup_routes()
         

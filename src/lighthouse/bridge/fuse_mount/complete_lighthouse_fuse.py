@@ -43,6 +43,7 @@ except ImportError:
 
 # Import secure components  
 from lighthouse.event_store.models import Event, EventType
+from .authentication import FUSEAuthenticationManager, FUSEAuthenticationContext
 from ..event_store.project_aggregate import ProjectAggregate
 from ..event_store.time_travel import TimeTravelDebugger
 from ..event_store.event_stream import EventStream
@@ -104,6 +105,7 @@ class CompleteLighthouseFUSE(Operations):
                  time_travel_debugger: TimeTravelDebugger,
                  event_stream: EventStream,
                  ast_anchor_manager: ASTAnchorManager,
+                 auth_secret: str,
                  mount_point: str = "/mnt/lighthouse/project"):
         """
         Initialize complete FUSE filesystem
@@ -113,6 +115,7 @@ class CompleteLighthouseFUSE(Operations):
             time_travel_debugger: Historical state reconstruction
             event_stream: Real-time event streaming
             ast_anchor_manager: AST annotation management
+            auth_secret: Secret for HMAC authentication
             mount_point: Where to mount the filesystem
         """
         
@@ -122,6 +125,10 @@ class CompleteLighthouseFUSE(Operations):
         self.event_stream = event_stream
         self.ast_anchor_manager = ast_anchor_manager
         self.mount_point = mount_point
+        
+        # Authentication system
+        self.auth_manager = FUSEAuthenticationManager(auth_secret)
+        self.auth_context = FUSEAuthenticationContext(self.auth_manager)
         
         # Filesystem structure
         self.root_directories = {
@@ -241,6 +248,11 @@ class CompleteLighthouseFUSE(Operations):
         """Get file attributes - enables ls, stat, file access"""
         start_time = time.time()
         
+        # Check authentication for all operations
+        if not self.auth_context.check_access(path, 'read'):
+            logger.warning(f"Unauthorized getattr attempt on {path}")
+            raise FuseOSError(errno.EACCES)
+        
         if not self._check_rate_limit('getattr'):
             raise FuseOSError(errno.EBUSY)
         
@@ -267,6 +279,11 @@ class CompleteLighthouseFUSE(Operations):
     def readdir(self, path: str, fh) -> List[str]:
         """List directory contents - enables ls, find"""
         start_time = time.time()
+        
+        # Check authentication for directory listing
+        if not self.auth_context.check_access(path, 'list'):
+            logger.warning(f"Unauthorized readdir attempt on {path}")
+            raise FuseOSError(errno.EACCES)
         
         if not self._check_rate_limit('readdir'):
             raise FuseOSError(errno.EBUSY)
@@ -300,6 +317,11 @@ class CompleteLighthouseFUSE(Operations):
     def read(self, path: str, length: int, offset: int, fh) -> bytes:
         """Read file content - enables cat, grep, editors"""
         start_time = time.time()
+        
+        # Check authentication for file reading
+        if not self.auth_context.check_access(path, 'read'):
+            logger.warning(f"Unauthorized read attempt on {path}")
+            raise FuseOSError(errno.EACCES)
         
         if not self._check_rate_limit('read'):
             raise FuseOSError(errno.EBUSY)
@@ -336,6 +358,11 @@ class CompleteLighthouseFUSE(Operations):
     def write(self, path: str, buf: bytes, offset: int, fh) -> int:
         """Write file content - enables editors with event-sourcing"""
         start_time = time.time()
+        
+        # Check authentication for file writing
+        if not self.auth_context.check_access(path, 'write'):
+            logger.warning(f"Unauthorized write attempt on {path}")
+            raise FuseOSError(errno.EACCES)
         
         if not self._check_rate_limit('write'):
             raise FuseOSError(errno.EBUSY)
@@ -562,12 +589,18 @@ class CompleteLighthouseFUSE(Operations):
             new_bytes = current_bytes[:offset] + buf + current_bytes[offset + len(buf):]
             new_content = new_bytes.decode('utf-8', errors='replace')
             
-            # Create event through project aggregate
+            # Get authenticated agent ID
+            current_agent = self.auth_context.get_current_agent()
+            if not current_agent:
+                logger.error(f"No authenticated agent for file write: {subpath}")
+                raise FuseOSError(errno.EACCES)  # Permission denied
+            
+            # Create event through project aggregate with authenticated agent
             asyncio.create_task(self.project_aggregate.handle_file_modification(
                 path=subpath,
                 content=new_content,
-                agent_id="fuse_user",  # Could be enhanced with real authentication
-                session_id=None
+                agent_id=current_agent,
+                session_id=self.auth_context._current_session
             ))
             
             return len(buf)
@@ -1083,6 +1116,62 @@ class CompleteLighthouseFUSE(Operations):
                 for op, times in self._operation_times.items()
             }
         }
+    
+    # Authentication Management Methods
+    
+    def authenticate_agent(self, 
+                          agent_id: str, 
+                          challenge: str, 
+                          response: str,
+                          permissions: Optional[set] = None) -> Optional[str]:
+        """
+        Authenticate agent for FUSE access
+        
+        Args:
+            agent_id: Agent identifier
+            challenge: Authentication challenge
+            response: HMAC response
+            permissions: Optional permission set
+            
+        Returns:
+            Session ID if successful, None otherwise
+        """
+        return self.auth_manager.authenticate_agent(
+            agent_id, challenge, response, permissions
+        )
+    
+    def set_current_session(self, session_id: Optional[str]):
+        """Set current session for FUSE operations"""
+        self.auth_context.set_session(session_id)
+    
+    def get_session_info(self, session_id: str) -> Optional[Dict[str, any]]:
+        """Get information about a session"""
+        return self.auth_manager.get_session_info(session_id)
+    
+    def logout_session(self, session_id: str) -> bool:
+        """Logout and invalidate a session"""
+        return self.auth_manager.logout_session(session_id)
+    
+    def get_audit_log(self, limit: int = 100) -> List[Dict[str, any]]:
+        """Get recent filesystem access audit log"""
+        return self.auth_manager.get_audit_log(limit)
+    
+    async def cleanup_expired_sessions(self):
+        """Cleanup expired sessions - should be called periodically"""
+        self.auth_manager.cleanup_expired_sessions()
+    
+    async def destroy(self):
+        """Cleanup filesystem resources"""
+        await self.cleanup_expired_sessions()
+        
+        # Clear all caches
+        self._attr_cache.clear()
+        self._dir_cache.clear() 
+        self._content_cache.clear()
+        self._history_cache.clear()
+        self._context_packages.clear()
+        
+        logger.info("FUSE filesystem destroyed and cleaned up")
 
 
 # FUSE Mount Manager for easy deployment

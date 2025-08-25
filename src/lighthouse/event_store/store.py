@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import secrets
 import time
 import hmac
 from pathlib import Path
@@ -53,7 +54,7 @@ class EventStore:
         self.authorizer = Authorizer(self.authenticator)
         
         # HMAC secret for event authentication
-        self.hmac_secret = (auth_secret or "lighthouse-event-secret").encode('utf-8')
+        self.hmac_secret = (auth_secret or os.environ.get('LIGHTHOUSE_EVENT_SECRET') or secrets.token_urlsafe(32)).encode('utf-8')
         
         # Configuration from ADR-002
         self.max_file_size = 100 * 1024 * 1024  # 100MB per ADR-002

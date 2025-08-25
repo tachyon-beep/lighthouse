@@ -3,6 +3,8 @@
 import hashlib
 import hmac
 import json
+import os
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set
@@ -90,7 +92,9 @@ class SimpleAuthenticator:
     be replaced with JWT tokens, mTLS, or other enterprise authentication.
     """
     
-    def __init__(self, shared_secret: str = "lighthouse-default-secret"):
+    def __init__(self, shared_secret: str = None):
+        if shared_secret is None:
+            shared_secret = os.environ.get('LIGHTHOUSE_AUTH_SECRET') or secrets.token_urlsafe(32)
         """Initialize authenticator with shared secret.
         
         Args:
@@ -138,11 +142,11 @@ class SimpleAuthenticator:
         }
     
     def authenticate(self, agent_id: str, token: str, role: AgentRole = AgentRole.AGENT) -> AgentIdentity:
-        """Authenticate agent using HMAC token.
+        """Authenticate agent using cryptographically secure HMAC token.
         
         Args:
             agent_id: Unique agent identifier
-            token: HMAC authentication token
+            token: HMAC authentication token with format "nonce:timestamp:hmac"
             role: Agent role (defaults to standard agent)
             
         Returns:
@@ -154,25 +158,43 @@ class SimpleAuthenticator:
         if not agent_id or not token:
             raise AuthenticationError("Agent ID and token are required")
         
-        # For simple authentication, token is HMAC of agent_id + timestamp
-        # Token format: "{timestamp}:{hmac_hex}"
+        # Secure token format: "nonce:timestamp:hmac_hex"
+        # Nonce prevents replay attacks, timestamp prevents token reuse
         try:
-            timestamp_str, hmac_hex = token.split(':', 1)
+            parts = token.split(':', 2)
+            if len(parts) != 3:
+                raise ValueError("Token must have 3 parts")
+            nonce_hex, timestamp_str, hmac_hex = parts
             timestamp = int(timestamp_str)
-        except ValueError:
-            raise AuthenticationError("Invalid token format")
+            
+            # Validate nonce format (must be hex-encoded bytes)
+            if len(nonce_hex) != 32:  # 16 bytes = 32 hex chars
+                raise ValueError("Invalid nonce length")
+            nonce_bytes = bytes.fromhex(nonce_hex)
+            
+        except (ValueError, TypeError) as e:
+            raise AuthenticationError(f"Invalid token format: {str(e)}")
         
         # Check if token is not too old (5 minute window)
         current_time = int(time.time())
         if abs(current_time - timestamp) > 300:  # 5 minutes
             raise AuthenticationError("Token expired or clock skew too large")
         
-        # Verify HMAC
-        expected_data = f"{agent_id}:{timestamp}".encode('utf-8')
+        # Verify HMAC using secure nonce + agent_id + timestamp
+        expected_data = f"{agent_id}:{nonce_hex}:{timestamp}".encode('utf-8')
         expected_hmac = hmac.new(self.shared_secret, expected_data, hashlib.sha256).hexdigest()
         
         if not hmac.compare_digest(hmac_hex, expected_hmac):
             raise AuthenticationError("Invalid authentication token")
+        
+        # Store nonce to prevent replay attacks (in production, use Redis/database)
+        if not hasattr(self, '_used_nonces'):
+            self._used_nonces = set()
+        
+        if nonce_hex in self._used_nonces:
+            raise AuthenticationError("Token replay attack detected")
+        
+        self._used_nonces.add(nonce_hex)
         
         # Create agent identity
         permissions = self.role_permissions.get(role, set())
@@ -221,18 +243,24 @@ class SimpleAuthenticator:
             del self._authenticated_agents[agent_id]
     
     def create_token(self, agent_id: str) -> str:
-        """Create authentication token for agent (for testing/demo purposes).
+        """Create cryptographically secure authentication token for agent.
         
         Args:
             agent_id: Agent identifier
             
         Returns:
-            HMAC authentication token
+            Secure HMAC authentication token with format "nonce:timestamp:hmac"
         """
+        # Generate cryptographically secure 16-byte nonce
+        nonce_bytes = secrets.token_bytes(16)
+        nonce_hex = nonce_bytes.hex()
         timestamp = int(time.time())
-        data = f"{agent_id}:{timestamp}".encode('utf-8')
+        
+        # Create HMAC with nonce + agent_id + timestamp
+        data = f"{agent_id}:{nonce_hex}:{timestamp}".encode('utf-8')
         hmac_digest = hmac.new(self.shared_secret, data, hashlib.sha256).hexdigest()
-        return f"{timestamp}:{hmac_digest}"
+        
+        return f"{nonce_hex}:{timestamp}:{hmac_digest}"
     
     def _get_rate_limit_for_role(self, role: AgentRole) -> int:
         """Get rate limit for agent role."""
@@ -439,7 +467,7 @@ def create_system_authenticator(secret: Optional[str] = None) -> SimpleAuthentic
         Configured SimpleAuthenticator
     """
     if secret is None:
-        secret = "lighthouse-system-secret-change-in-production"
+        secret = os.environ.get('LIGHTHOUSE_SYSTEM_SECRET') or secrets.token_urlsafe(32)
     
     authenticator = SimpleAuthenticator(shared_secret=secret)
     

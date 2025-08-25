@@ -1,6 +1,7 @@
 """Lighthouse Event Store - Secure, high-performance event sourcing foundation."""
 
 from .store import EventStore, EventStoreError
+from .sqlite_store import SQLiteEventStore, SQLiteEventStoreError
 from .models import (
     Event, EventType, EventBatch, EventFilter, EventQuery,
     QueryResult, SystemHealth, SnapshotMetadata
@@ -19,7 +20,7 @@ from .snapshots import SnapshotManager, SnapshotError, AutoSnapshotManager
 
 __all__ = [
     # Core event store
-    "EventStore", "EventStoreError",
+    "EventStore", "EventStoreError", "SQLiteEventStore", "SQLiteEventStoreError",
     # Event models
     "Event", "EventType", "EventBatch", "EventFilter", "EventQuery", 
     "QueryResult", "SystemHealth", "SnapshotMetadata",

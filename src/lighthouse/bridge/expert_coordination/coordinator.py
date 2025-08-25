@@ -18,6 +18,8 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -143,7 +145,7 @@ class SecureExpertCoordinator:
         self.fuse_mount_path = Path(fuse_mount_path) if fuse_mount_path else None
         
         # Use event store's authentication system
-        self.auth_secret = (auth_secret or "lighthouse-expert-coordination").encode('utf-8')
+        self.auth_secret = (auth_secret or os.environ.get('LIGHTHOUSE_EXPERT_SECRET') or secrets.token_urlsafe(32)).encode('utf-8')
         
         # Expert registry with authentication
         self.registered_experts: Dict[str, RegisteredExpert] = {}
