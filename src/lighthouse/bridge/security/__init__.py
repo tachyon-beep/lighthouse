@@ -46,6 +46,12 @@ from .security_monitoring import (
     log_security_event
 )
 
+from .session_security import (
+    SessionState,
+    SessionInfo,
+    SessionSecurityValidator
+)
+
 __all__ = [
     # Path Security
     'PathSecurityError',
@@ -85,5 +91,10 @@ __all__ = [
     'ExternalConsultantInterface',
     'SecurityMonitoringEngine',
     'get_security_monitor',
-    'log_security_event'
+    'log_security_event',
+    
+    # Session Security
+    'SessionState',
+    'SessionInfo',
+    'SessionSecurityValidator'
 ]

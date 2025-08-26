@@ -11,11 +11,11 @@ Lighthouse is an MCP (Model Context Protocol) server that provides command valid
 
 ## Architecture
 
-The system consists of three core components:
+The system consists of integrated core components:
 
-- **Server** (`src/lighthouse/server.py`): Main MCP server implementation
-- **Bridge** (`src/lighthouse/bridge.py`): Validation bridge for inter-agent communication, pair programming sessions, and agent coordination
-- **Validator** (`src/lighthouse/validator.py`): Command validation logic with security rules
+- **MCP Server** (`src/lighthouse/mcp_server.py`): Secure MCP server with Bridge integration, HMAC-SHA256 session security, and unified event store
+- **Minimal Bridge** (`src/lighthouse/mcp_bridge_minimal.py`): Essential Bridge components for MCP integration (EventStore, SessionSecurity, SpeedLayer, ExpertCoordination)
+- **Main Bridge** (`src/lighthouse/bridge/main_bridge.py`): Full Bridge system for comprehensive multi-agent coordination and validation
 
 ## Development Commands
 
@@ -25,8 +25,8 @@ The system consists of three core components:
 # Install in development mode with dev dependencies
 pip install -e ".[dev]"
 
-# Start the validation bridge server
-python -m lighthouse.server
+# Start the MCP server with Bridge integration
+python -m lighthouse.mcp_server
 ```
 
 ### Testing
@@ -80,10 +80,12 @@ Located in `src/lighthouse/validator.py`:
 
 ## Important Files
 
-- **Core validation logic**: `src/lighthouse/validator.py:19-50` (validation rules)
-- **Bridge server**: `src/lighthouse/bridge.py:47-80` (HTTP endpoints)
-- **MCP server**: `src/lighthouse/server.py:30-60` (tool handlers)
+- **MCP Server**: `src/lighthouse/mcp_server.py` (Secure MCP server with Bridge integration, session management, and event store)
+- **Minimal Bridge**: `src/lighthouse/mcp_bridge_minimal.py` (Essential Bridge components for MCP integration)
+- **Session Security**: `src/lighthouse/bridge/security/session_security.py` (HMAC-SHA256 session validation and hijacking prevention)
+- **Main Bridge**: `src/lighthouse/bridge/main_bridge.py` (Full Bridge system with multi-agent coordination)
 - **Hook configuration**: `.claude/config.json`
+- **MCP Configuration**: `.mcp.json` (MCP server configuration for Claude Code)
 - **Package config**: `pyproject.toml` (build system, dev dependencies, tool settings)
 
 ## Testing Strategy
@@ -109,3 +111,38 @@ When validation bridge is offline:
 - Safe tools are allowed
 - Dangerous commands are blocked
 - Unknown tools proceed with logging
+
+## CRITICAL FILE READING REQUIREMENTS - NO EXCEPTIONS
+
+### ABSOLUTE REQUIREMENT: READ ENTIRE FILES COMPLETELY - NO PARTIAL READS ALLOWED
+
+IF YOU TRY TO READ ANY FILE (PYTHON, MARKDOWN, JSON, ETC.) AND IT EXCEEDS THE LIMIT, YOU MUST STILL READ IT IN FULL. YOU MUST NEVER READ THE FIRST 100 LINES AND DECIDE YOU KNOW ENOUGH.
+
+**THIS IS NON-NEGOTIABLE. PARTIAL FILE ANALYSIS IS COMPLETELY UNACCEPTABLE.**
+
+### MANDATORY Process for Large Files
+
+1. Read the file normally first
+2. If truncated, immediately read the rest using offset/limit parameters
+3. Continue reading ALL remaining sections until the ENTIRE file is read
+4. ONLY then proceed with analysis
+
+### EXAMPLES OF REQUIRED BEHAVIOR
+
+- 1000-line file: Read lines 1-500, then 501-1000, then analyze
+- 2000-line file: Read in 500-line chunks until complete
+- Any file: Read EVERY SINGLE LINE before making any conclusions
+- MD files: Read entire documentation files, not just headers
+- Python files: Read all functions, classes, and implementation details
+- JSON/config files: Read all configuration sections and values
+
+### ABSOLUTELY FORBIDDEN BEHAVIORS
+
+- "I read the first 100 lines, that's enough to understand the structure"
+- "The file is too long, I'll just read the imports and classes"
+- "I can see the pattern from the beginning, no need to read more"
+- "I'll just read the headers and skip the implementation details"
+- Making ANY architectural or debugging decisions from partial reads
+- Concluding ANYTHING about a file's functionality without reading it completely
+
+**VIOLATION OF THIS RULE IS COMPLETELY UNACCEPTABLE AND MUST NEVER HAPPEN.**

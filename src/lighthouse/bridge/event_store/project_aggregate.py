@@ -475,9 +475,9 @@ class ProjectAggregate:
             event.metadata["session_id"] = session_id
             event.metadata["agent_id"] = agent_id
         
-        # Generate content hash
+        # Generate content hash and store in metadata
         content = f"{event_type.value}:{self.project_id}:{str(sorted(data.items()))}"
-        event.content_hash = hashlib.sha256(content.encode()).hexdigest()
+        event.metadata["content_hash"] = hashlib.sha256(content.encode()).hexdigest()
         
         return event
     

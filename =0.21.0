@@ -1,0 +1,8 @@
+Requirement already satisfied: pytest-xdist in ./venv/lib/python3.12/site-packages (3.8.0)
+Requirement already satisfied: pytest-asyncio in ./venv/lib/python3.12/site-packages (1.1.0)
+Requirement already satisfied: execnet>=2.1 in ./venv/lib/python3.12/site-packages (from pytest-xdist) (2.1.1)
+Requirement already satisfied: pytest>=7.0.0 in ./venv/lib/python3.12/site-packages (from pytest-xdist) (8.4.1)
+Requirement already satisfied: iniconfig>=1 in ./venv/lib/python3.12/site-packages (from pytest>=7.0.0->pytest-xdist) (2.1.0)
+Requirement already satisfied: packaging>=20 in ./venv/lib/python3.12/site-packages (from pytest>=7.0.0->pytest-xdist) (25.0)
+Requirement already satisfied: pluggy<2,>=1.5 in ./venv/lib/python3.12/site-packages (from pytest>=7.0.0->pytest-xdist) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in ./venv/lib/python3.12/site-packages (from pytest>=7.0.0->pytest-xdist) (2.19.2)

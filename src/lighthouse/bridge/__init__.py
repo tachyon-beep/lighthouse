@@ -22,8 +22,36 @@ from .ast_anchoring.anchor_manager import ASTAnchorManager
 from .expert_coordination.interface import ExpertAgentInterface
 from .pair_programming.session_manager import PairProgrammingSessionManager
 
+# Compatibility classes
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+@dataclass
+class CommandData:
+    """Legacy command data structure"""
+    id: str
+    tool: str
+    input: Dict[str, Any]
+    agent: str
+    timestamp: Optional[datetime] = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+
+# Backward compatibility aliases
+ValidationBridge = LighthouseBridge
+
+def get_validation_bridge():
+    """Legacy compatibility function"""
+    return LighthouseBridge(project_id="default_project")
+
 __all__ = [
     'LighthouseBridge',
+    'ValidationBridge',  # Compatibility alias
+    'CommandData',       # Compatibility class
+    'get_validation_bridge',   # Legacy compatibility
     'SpeedLayerDispatcher', 
     'ProjectAggregate',
     'LighthouseFUSE',

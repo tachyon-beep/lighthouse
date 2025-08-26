@@ -12,8 +12,8 @@ from pathlib import Path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
-from lighthouse.bridge import ValidationBridge, CommandData
-from lighthouse.validator import CommandValidator
+from lighthouse import LighthouseBridge
+from lighthouse.mcp_server import LighthouseEventStoreMCP
 
 
 async def test_validator_standalone():

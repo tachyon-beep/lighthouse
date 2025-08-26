@@ -23,6 +23,8 @@ from .event_store import ProjectAggregate, EventStream, TimeTravelDebugger
 from .fuse_mount import LighthouseFUSE, FUSEMountManager
 from .ast_anchoring import ASTAnchorManager, TreeSitterParser
 from .expert_coordination import ExpertAgentInterface, ExpertCoordinator
+from .security.session_security import SessionSecurityValidator
+from ..event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +59,10 @@ class LighthouseBridge:
         self.config = config or {}
         
         # Component initialization
+        self.event_store = EventStore()
         self.project_aggregate = ProjectAggregate(project_id)
         self.event_stream = EventStream(fuse_mount_path=f"{mount_point}/streams")
-        self.time_travel_debugger = TimeTravelDebugger(None)  # Will set event store later
+        self.time_travel_debugger = TimeTravelDebugger(self.event_store)
         self.tree_sitter_parser = TreeSitterParser()
         self.ast_anchor_manager = ASTAnchorManager(self.tree_sitter_parser)
         
@@ -77,18 +80,30 @@ class LighthouseBridge:
             time_travel_debugger=self.time_travel_debugger,
             event_stream=self.event_stream,
             ast_anchor_manager=self.ast_anchor_manager,
+            auth_secret=self.config.get('auth_secret', 'test_secret_key'),
             mount_point=mount_point
         )
         
         self.fuse_mount_manager = FUSEMountManager(
-            lighthouse_fuse=self.lighthouse_fuse,
+            event_store=self.event_store,
+            project_aggregate=self.project_aggregate,
+            ast_anchor_manager=self.ast_anchor_manager,
+            event_stream_manager=self.event_stream,
             mount_point=mount_point,
             foreground=self.config.get('fuse_foreground', False),
             allow_other=self.config.get('fuse_allow_other', True)
         )
         
         # Expert coordination
-        self.expert_coordinator = ExpertCoordinator()
+        self.expert_coordinator = ExpertCoordinator(self.event_store)
+        
+        # Session security
+        auth_secret = self.config.get('auth_secret', 'test_secret_key')
+        self.session_security = SessionSecurityValidator(
+            secret_key=auth_secret,
+            session_timeout=self.config.get('session_timeout', 3600),
+            max_concurrent_sessions=self.config.get('max_concurrent_sessions', 3)
+        )
         
         # Integration state
         self.is_running = False
@@ -188,14 +203,19 @@ class LighthouseBridge:
         await self.event_stream.start()
         
         # Subscribe to project events for real-time updates
-        from ..event_store.event_models import EventFilter
-        project_filter = EventFilter(aggregate_ids=[self.project_id])
+        try:
+            from ..event_store.event_models import EventFilter
+            project_filter = EventFilter(aggregate_ids=[self.project_id])
+        except ImportError:
+            # Handle missing module gracefully for now
+            project_filter = None
         
-        self.event_stream.subscribe(
-            subscriber_id="bridge_main",
-            event_filter=project_filter,
-            callback=self._handle_project_event
-        )
+        if project_filter:
+            self.event_stream.subscribe(
+                subscriber_id="bridge_main",
+                event_filter=project_filter,
+                callback=self._handle_project_event
+            )
     
     async def _start_speed_layer(self):
         """Start speed layer validation system"""
@@ -356,12 +376,24 @@ class LighthouseBridge:
                              tool_name: str,
                              tool_input: Dict[str, Any],
                              agent_id: str,
-                             session_id: Optional[str] = None) -> Dict[str, Any]:
+                             session_id: Optional[str] = None,
+                             session_token: Optional[str] = None) -> Dict[str, Any]:
         """
         Validate a command through the bridge system
         
         This is the main entry point for command validation.
         """
+        
+        # Session security validation first
+        if session_token:
+            if not self.session_security.validate_session(session_token, agent_id):
+                return {
+                    "approved": False,
+                    "reason": "Invalid or hijacked session",
+                    "security_alert": "Session validation failed",
+                    "request_id": None,
+                    "response_time": 0.0
+                }
         
         from .speed_layer.models import ValidationRequest
         
@@ -425,9 +457,9 @@ class LighthouseBridge:
             'uptime_seconds': uptime,
             'start_time': self.start_time.isoformat() if self.start_time else None,
             
-            # Component status
+            # Component status  
             'components': {
-                'speed_layer': self.speed_layer_dispatcher.get_performance_metrics(),
+                'speed_layer': self.speed_layer_dispatcher.get_performance_stats(),
                 'fuse_mount': self.fuse_mount_manager.get_status(),
                 'event_stream': self.event_stream.get_stream_stats(),
                 'ast_anchors': self.ast_anchor_manager.get_statistics(),
@@ -474,6 +506,68 @@ class LighthouseBridge:
         except Exception as e:
             logger.error(f"Failed to create context package {package_id}: {e}")
             return False
+    
+    # Session Security Methods
+    
+    async def create_session(self, agent_id: str, ip_address: str = "", 
+                           user_agent: str = "") -> Dict[str, Any]:
+        """Create a new secure session for an agent"""
+        try:
+            session = self.session_security.create_session(agent_id, ip_address, user_agent)
+            logger.info(f"Session created for agent {agent_id}: {session.session_id}")
+            return {
+                "session_id": session.session_id,
+                "session_token": session.session_token,
+                "created_at": session.created_at,
+                "expires_at": session.created_at + self.session_security.session_timeout
+            }
+        except Exception as e:
+            logger.error(f"Session creation failed for agent {agent_id}: {e}")
+            return {"error": str(e)}
+    
+    async def validate_session(self, session_token: str, agent_id: str = "", 
+                             ip_address: str = "", user_agent: str = "") -> Dict[str, Any]:
+        """Validate session token and detect hijacking"""
+        try:
+            is_valid = self.session_security.validate_session(
+                session_token, agent_id, ip_address, user_agent
+            )
+            return {"valid": is_valid}
+        except Exception as e:
+            logger.error(f"Session validation error: {e}")
+            return {"valid": False, "error": str(e)}
+    
+    async def revoke_session(self, session_id: str, reason: str = "manual") -> Dict[str, Any]:
+        """Revoke a session"""
+        try:
+            self.session_security.revoke_session(session_id, reason)
+            logger.info(f"Session revoked: {session_id} (reason: {reason})")
+            return {"revoked": True}
+        except Exception as e:
+            logger.error(f"Session revocation failed: {e}")
+            return {"revoked": False, "error": str(e)}
+    
+    async def validate_websocket_connection(self, websocket_url: str, agent_id: str) -> Dict[str, Any]:
+        """Validate WebSocket connection against hijacking"""
+        try:
+            is_valid = self.session_security.validate_websocket_hijacking(websocket_url, agent_id)
+            return {"valid": is_valid}
+        except Exception as e:
+            logger.error(f"WebSocket validation error: {e}")
+            return {"valid": False, "error": str(e)}
+    
+    async def validate_message(self, message: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
+        """Validate message against interception attacks"""
+        try:
+            is_valid = self.session_security.validate_message_interception(message, agent_id)
+            return {"valid": is_valid}
+        except Exception as e:
+            logger.error(f"Message validation error: {e}")
+            return {"valid": False, "error": str(e)}
+    
+    def get_session_security_report(self) -> Dict[str, Any]:
+        """Get session security report"""
+        return self.session_security.get_security_report()
     
     # Context manager support
     

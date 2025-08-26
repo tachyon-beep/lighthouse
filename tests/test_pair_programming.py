@@ -3,16 +3,24 @@
 import pytest
 import json
 from unittest.mock import Mock, patch, AsyncMock
-from lighthouse.bridge import ValidationBridge, PairProgrammingSession
-from lighthouse.validator import CommandValidator
+from lighthouse import LighthouseBridge
+from lighthouse.bridge.pair_programming import PairProgrammingHub
+import tempfile
+import os
 
 
 class TestPairProgrammingBridge:
-    """Test cases for pair programming in ValidationBridge."""
+    """Test cases for pair programming in HLD Bridge."""
     
     def setup_method(self):
         """Set up test fixtures."""
-        self.bridge = ValidationBridge(port=8766)
+        self.temp_dir = tempfile.mkdtemp()
+        self.config = {
+            'event_store_type': 'sqlite', 
+            'event_store_config': {'db_path': os.path.join(self.temp_dir, 'test_events.db')},
+            'auth_secret': 'test_pair_programming'
+        }
+        self.bridge = LighthouseBridge("test_project", self.config)
     
     @pytest.mark.asyncio
     async def test_pair_request_creation(self):

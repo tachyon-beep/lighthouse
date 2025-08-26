@@ -6,30 +6,42 @@ import subprocess
 import sys
 import time
 import pytest
+import pytest_asyncio
 import aiohttp
 from pathlib import Path
 
-from lighthouse.bridge import ValidationBridge
-from lighthouse.server import LighthouseServer
+from lighthouse import LighthouseBridge
+from lighthouse.mcp_server import LighthouseEventStoreMCP
 
 
 class TestLighthouseIntegration:
     """Integration tests for the complete system."""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def system_setup(self):
         """Set up the complete system for testing."""
-        # Start bridge
-        bridge = ValidationBridge(port=8767)
-        await bridge.start()
+        # Set up bridge with proper config
+        import tempfile
+        import os
         
-        # Note: MCP server testing would require more complex setup
-        # For now we test components independently
+        temp_dir = tempfile.mkdtemp()
+        config = {
+            'event_store_type': 'sqlite',
+            'event_store_config': {'db_path': os.path.join(temp_dir, 'integration_test.db')},
+            'auth_secret': 'integration_test_secret'
+        }
         
-        yield {'bridge': bridge}
+        bridge = LighthouseBridge('integration_test_project', config)
+        
+        # Set up MCP server
+        mcp_server = LighthouseEventStoreMCP()
+        await mcp_server.initialize()
+        
+        yield {'bridge': bridge, 'mcp_server': mcp_server}
         
         # Cleanup
         await bridge.stop()
+        await mcp_server.shutdown()
     
     @pytest.mark.asyncio
     async def test_hook_to_bridge_integration(self, system_setup):

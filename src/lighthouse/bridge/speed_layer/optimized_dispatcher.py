@@ -603,3 +603,7 @@ class OptimizedSpeedLayerDispatcher:
         }
         
         return stats
+    
+    def get_performance_metrics(self) -> Dict[str, any]:
+        """Alias for get_performance_stats for compatibility"""
+        return self.get_performance_stats()

@@ -6,11 +6,13 @@ import pytest
 import aiohttp
 from unittest.mock import AsyncMock, patch
 
-from lighthouse.bridge import ValidationBridge, CommandData
+from lighthouse import LighthouseBridge
+import tempfile
+import os
 
 
 class TestValidationBridge:
-    """Test cases for ValidationBridge."""
+    """Test cases for LighthouseBridge."""
     
     @pytest.fixture
     async def bridge(self):
