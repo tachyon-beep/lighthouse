@@ -1,0 +1,39 @@
+# Grafana datasource configuration
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: 2.48.0
+      cacheLevel: 'High'
+      disableMetricsLookup: false
+      incrementalQuerying: false
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+    
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: true
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: 'prometheus'
+        tags:
+          - key: 'service.name'
+            value: 'lighthouse-bridge'
+        queries:
+          - name: 'Request Rate'
+            query: 'rate(lighthouse_bridge_requests_total[$__rate_interval])'
+          - name: 'Error Rate'
+            query: 'rate(lighthouse_bridge_errors_total[$__rate_interval])'

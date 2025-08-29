@@ -1,0 +1,101 @@
+# Lighthouse Bridge Container with pyfuse3 (libfuse3)
+# Direct cutover - no migration strategy needed (pre-1.0)
+
+# Stage 1: Builder
+FROM python:3.11-slim-bookworm AS builder
+
+# Install build dependencies for pyfuse3 and optional packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    libfuse3-dev \
+    pkg-config \
+    git \
+    # For tree-sitter
+    build-essential \
+    # For scipy/numpy
+    libopenblas-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy requirements and install Python dependencies
+WORKDIR /build
+COPY requirements-pyfuse3.txt .
+RUN pip install --no-cache-dir -U pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements-pyfuse3.txt
+
+# Stage 2: Runtime
+FROM python:3.11-slim-bookworm
+
+# Install runtime dependencies - both libfuse2 and libfuse3 for compatibility
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libfuse2 \
+    libfuse3-3 \
+    ca-certificates \
+    curl \
+    # For scipy/numpy runtime
+    libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd -r lighthouse && useradd -r -g lighthouse -u 1000 lighthouse && \
+    mkdir -p /home/lighthouse && \
+    chown -R lighthouse:lighthouse /home/lighthouse
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
+ENV VIRTUAL_ENV="/opt/venv"
+
+# Set library paths for libfuse3
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+
+# Create necessary directories
+RUN mkdir -p /var/lib/lighthouse/events && \
+    mkdir -p /var/lib/lighthouse/snapshots && \
+    mkdir -p /var/lib/lighthouse/cache && \
+    mkdir -p /mnt/lighthouse/project && \
+    mkdir -p /app/logs && \
+    chown -R lighthouse:lighthouse /var/lib/lighthouse && \
+    chown -R lighthouse:lighthouse /mnt/lighthouse && \
+    chown -R lighthouse:lighthouse /app
+
+# Copy application code
+WORKDIR /app
+COPY --chown=lighthouse:lighthouse src/ src/
+COPY --chown=lighthouse:lighthouse scripts/ scripts/
+
+# Copy pyfuse3 startup script
+COPY --chown=lighthouse:lighthouse scripts/docker/start-bridge-pyfuse3.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-bridge-pyfuse3.sh
+
+# Environment variables
+ENV LIGHTHOUSE_ENV=production \
+    LIGHTHOUSE_PORT=8765 \
+    LIGHTHOUSE_HOST=0.0.0.0 \
+    LIGHTHOUSE_LOG_LEVEL=INFO \
+    LIGHTHOUSE_EVENT_STORE_PATH=/var/lib/lighthouse/events \
+    LIGHTHOUSE_SNAPSHOT_PATH=/var/lib/lighthouse/snapshots \
+    LIGHTHOUSE_CACHE_PATH=/var/lib/lighthouse/cache \
+    LIGHTHOUSE_MOUNT_POINT=/mnt/lighthouse/project \
+    LIGHTHOUSE_FUSE_BACKEND=pyfuse3 \
+    PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8765/health || exit 1
+
+# Expose Bridge API port
+EXPOSE 8765
+
+# Switch to non-root user (but need CAP_SYS_ADMIN for FUSE)
+USER lighthouse
+
+# Entry point
+ENTRYPOINT ["/usr/local/bin/start-bridge-pyfuse3.sh"]

@@ -1,0 +1,185 @@
+# Prometheus alerting rules for Lighthouse Bridge
+
+groups:
+  - name: lighthouse-bridge-health
+    interval: 30s
+    rules:
+      # Bridge service availability
+      - alert: LighthouseBridgeDown
+        expr: up{job="lighthouse-bridge"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+        annotations:
+          summary: "Lighthouse Bridge is down"
+          description: "Lighthouse Bridge has been down for more than 1 minute."
+          
+      - alert: LighthouseBridgeHighMemoryUsage
+        expr: (lighthouse_bridge_memory_usage_bytes / lighthouse_bridge_memory_limit_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+        annotations:
+          summary: "High memory usage in Lighthouse Bridge"
+          description: "Memory usage is {{ $value | humanizePercentage }} ({{ $labels.instance }})"
+          
+      - alert: LighthouseBridgeFUSEMountFailed
+        expr: lighthouse_bridge_fuse_mount_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+        annotations:
+          summary: "FUSE mount failed in Lighthouse Bridge"
+          description: "FUSE filesystem mount has failed on {{ $labels.instance }}"
+
+  - name: lighthouse-bridge-performance
+    interval: 15s
+    rules:
+      # Speed Layer performance
+      - alert: SpeedLayerHighLatency
+        expr: histogram_quantile(0.95, lighthouse_bridge_speed_layer_validation_duration_seconds_bucket) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+          component: speed-layer
+        annotations:
+          summary: "High latency in Speed Layer validation"
+          description: "95th percentile validation latency is {{ $value }}s on {{ $labels.instance }}"
+          
+      - alert: SpeedLayerLowCacheHitRatio
+        expr: (rate(lighthouse_bridge_speed_layer_cache_hits_total[5m]) / rate(lighthouse_bridge_speed_layer_cache_requests_total[5m])) < 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+          component: speed-layer
+        annotations:
+          summary: "Low cache hit ratio in Speed Layer"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          
+      - alert: ExpertEscalationRate
+        expr: rate(lighthouse_bridge_expert_escalations_total[5m]) > 10
+        for: 3m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+          component: expert-coordination
+        annotations:
+          summary: "High expert escalation rate"
+          description: "Expert escalation rate is {{ $value }} per second on {{ $labels.instance }}"
+
+  - name: lighthouse-bridge-errors
+    interval: 30s
+    rules:
+      # Error rates
+      - alert: HighErrorRate
+        expr: rate(lighthouse_bridge_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+        annotations:
+          summary: "High error rate in Lighthouse Bridge"
+          description: "Error rate is {{ $value }} per second on {{ $labels.instance }}"
+          
+      - alert: EventStorePersistenceFailures
+        expr: rate(lighthouse_bridge_event_store_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+          component: event-store
+        annotations:
+          summary: "Event store persistence failures"
+          description: "Event store is failing to persist events on {{ $labels.instance }}"
+
+  - name: lighthouse-bridge-dependencies
+    interval: 30s
+    rules:
+      # External dependencies
+      - alert: RedisConnectionFailed
+        expr: lighthouse_bridge_redis_connection_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+          dependency: redis
+        annotations:
+          summary: "Redis connection failed"
+          description: "Cannot connect to Redis from {{ $labels.instance }}"
+          
+      - alert: PostgresConnectionFailed
+        expr: lighthouse_bridge_postgres_connection_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+          dependency: postgres
+        annotations:
+          summary: "PostgreSQL connection failed"
+          description: "Cannot connect to PostgreSQL from {{ $labels.instance }}"
+
+  - name: lighthouse-bridge-capacity
+    interval: 60s
+    rules:
+      # Capacity planning
+      - alert: HighConnectionCount
+        expr: lighthouse_bridge_active_connections > 800
+        for: 5m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+        annotations:
+          summary: "High connection count"
+          description: "Active connections: {{ $value }} on {{ $labels.instance }}"
+          
+      - alert: ExpertQueueBacklog
+        expr: lighthouse_bridge_expert_queue_size > 100
+        for: 3m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+          component: expert-coordination
+        annotations:
+          summary: "Expert coordination queue backlog"
+          description: "Queue size: {{ $value }} requests on {{ $labels.instance }}"
+
+  - name: lighthouse-bridge-sla
+    interval: 30s
+    rules:
+      # SLA monitoring
+      - record: lighthouse_bridge_availability_5m
+        expr: avg_over_time(up{job="lighthouse-bridge"}[5m])
+        
+      - record: lighthouse_bridge_p95_latency_5m
+        expr: histogram_quantile(0.95, rate(lighthouse_bridge_request_duration_seconds_bucket[5m]))
+        
+      - record: lighthouse_bridge_error_rate_5m
+        expr: rate(lighthouse_bridge_errors_total[5m]) / rate(lighthouse_bridge_requests_total[5m])
+        
+      # SLA violations
+      - alert: SLAViolationAvailability
+        expr: lighthouse_bridge_availability_5m < 0.999
+        for: 1m
+        labels:
+          severity: critical
+          service: lighthouse-bridge
+          sla: availability
+        annotations:
+          summary: "SLA violation: Availability below 99.9%"
+          description: "Current availability: {{ $value | humanizePercentage }}"
+          
+      - alert: SLAViolationLatency
+        expr: lighthouse_bridge_p95_latency_5m > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: lighthouse-bridge
+          sla: latency
+        annotations:
+          summary: "SLA violation: P95 latency above 100ms"
+          description: "Current P95 latency: {{ $value }}s"

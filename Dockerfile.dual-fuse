@@ -1,0 +1,239 @@
+# Multi-stage Dockerfile for Lighthouse Bridge with Dual FUSE Support
+# Supports both fusepy (FUSE2) and pyfuse3 (FUSE3) during migration period
+
+# Stage 1: Builder with both FUSE versions
+FROM python:3.11-slim-bookworm AS builder
+
+# Install build dependencies for BOTH FUSE versions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    libfuse-dev \
+    libfuse3-dev \
+    pkg-config \
+    git \
+    python3-dev \
+    # Additional dependencies for optional packages
+    gfortran \
+    libblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment in /opt/venv
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install requirements
+WORKDIR /build
+COPY requirements-dual-fuse.txt requirements.txt
+
+# Install Python dependencies with both FUSE backends
+RUN pip install --no-cache-dir -U pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Test environment for both backends
+FROM python:3.11-slim-bookworm AS tester
+
+# Install both FUSE runtime libraries for testing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fuse \
+    libfuse2 \
+    fuse3 \
+    libfuse3-3 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV VIRTUAL_ENV="/opt/venv"
+
+# Copy test scripts and run tests
+WORKDIR /test
+COPY tests/fuse-compatibility/ .
+RUN python -m pytest test_fuse_backends.py -v
+
+# Stage 3: Runtime with dual FUSE support
+FROM python:3.11-slim-bookworm AS runtime
+
+# Install runtime dependencies for BOTH FUSE versions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # FUSE 2 support
+    fuse \
+    libfuse2 \
+    # FUSE 3 support  
+    fuse3 \
+    libfuse3-3 \
+    # Common utilities
+    ca-certificates \
+    curl \
+    # Performance monitoring
+    htop \
+    iotop \
+    sysstat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create FUSE library symlinks for compatibility
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libfuse.so.2 /usr/lib/libfuse.so.2 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/lib/libfuse3.so.3
+
+# Create non-root user for security
+RUN groupadd -r lighthouse && useradd -r -g lighthouse -u 1000 lighthouse && \
+    mkdir -p /home/lighthouse && \
+    chown -R lighthouse:lighthouse /home/lighthouse
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Set Python environment
+ENV PATH="/opt/venv/bin:$PATH"
+ENV VIRTUAL_ENV="/opt/venv"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
+
+# Configure library paths for both FUSE versions
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/usr/lib:$LD_LIBRARY_PATH"
+
+# FUSE backend selection (default to fusepy during transition)
+ENV LIGHTHOUSE_FUSE_BACKEND="fusepy"
+ENV LIGHTHOUSE_FUSE_FALLBACK="pyfuse3"
+
+# Create necessary directories
+RUN mkdir -p /var/lib/lighthouse/events && \
+    mkdir -p /var/lib/lighthouse/snapshots && \
+    mkdir -p /var/lib/lighthouse/cache && \
+    mkdir -p /mnt/lighthouse/project && \
+    mkdir -p /app/logs && \
+    mkdir -p /app/benchmarks && \
+    chown -R lighthouse:lighthouse /var/lib/lighthouse && \
+    chown -R lighthouse:lighthouse /mnt/lighthouse && \
+    chown -R lighthouse:lighthouse /app
+
+# Copy application code
+WORKDIR /app
+COPY --chown=lighthouse:lighthouse src/ src/
+COPY --chown=lighthouse:lighthouse scripts/ scripts/
+COPY --chown=lighthouse:lighthouse tests/ tests/
+
+# Copy dual-FUSE startup script
+COPY --chown=lighthouse:lighthouse scripts/docker/start-bridge-dual-fuse.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-bridge-dual-fuse.sh
+
+# Copy FUSE backend validator
+COPY --chown=lighthouse:lighthouse scripts/docker/validate-fuse-backend.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/validate-fuse-backend.py
+
+# Environment variables with backend configuration
+ENV LIGHTHOUSE_ENV=production \
+    LIGHTHOUSE_PORT=8765 \
+    LIGHTHOUSE_HOST=0.0.0.0 \
+    LIGHTHOUSE_LOG_LEVEL=INFO \
+    LIGHTHOUSE_EVENT_STORE_PATH=/var/lib/lighthouse/events \
+    LIGHTHOUSE_SNAPSHOT_PATH=/var/lib/lighthouse/snapshots \
+    LIGHTHOUSE_CACHE_PATH=/var/lib/lighthouse/cache \
+    LIGHTHOUSE_MOUNT_POINT=/mnt/lighthouse/project \
+    LIGHTHOUSE_FUSE_BACKEND=fusepy \
+    LIGHTHOUSE_FUSE_FALLBACK=pyfuse3 \
+    LIGHTHOUSE_FUSE_BENCHMARK=false \
+    LIGHTHOUSE_FUSE_PARALLEL_TEST=false \
+    PYTHONUNBUFFERED=1
+
+# Health check with backend validation
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python /usr/local/bin/validate-fuse-backend.py && \
+        curl -f http://localhost:8765/health || exit 1
+
+# Expose Bridge API port
+EXPOSE 8765
+
+# Expose metrics port for monitoring
+EXPOSE 9100
+
+# Switch to non-root user
+USER lighthouse
+
+# Entry point
+ENTRYPOINT ["/usr/local/bin/start-bridge-dual-fuse.sh"]
+
+# Stage 4: Development environment with both backends
+FROM runtime AS development
+
+USER root
+
+# Install development tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    vim \
+    nano \
+    less \
+    git \
+    strace \
+    ltrace \
+    gdb \
+    python3-dbg \
+    valgrind \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install development Python packages
+RUN /opt/venv/bin/pip install --no-cache-dir \
+    ipython \
+    ipdb \
+    pytest-asyncio \
+    pytest-cov \
+    pytest-benchmark \
+    black \
+    mypy \
+    ruff \
+    memory-profiler \
+    line-profiler
+
+# Enable core dumps for debugging
+RUN echo "* soft core unlimited" >> /etc/security/limits.conf && \
+    echo "* hard core unlimited" >> /etc/security/limits.conf
+
+USER lighthouse
+
+# Development-specific environment
+ENV LIGHTHOUSE_ENV=development \
+    LIGHTHOUSE_LOG_LEVEL=DEBUG \
+    LIGHTHOUSE_FUSE_DEBUG=true \
+    LIGHTHOUSE_FUSE_BENCHMARK=true \
+    LIGHTHOUSE_FUSE_PARALLEL_TEST=true
+
+# Stage 5: Benchmark environment for performance testing
+FROM runtime AS benchmark
+
+USER root
+
+# Install benchmarking tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sysbench \
+    fio \
+    stress-ng \
+    perf-tools-unstable \
+    linux-perf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python profiling packages
+RUN /opt/venv/bin/pip install --no-cache-dir \
+    pytest-benchmark \
+    py-spy \
+    scalene \
+    memory-profiler \
+    line-profiler \
+    snakeviz
+
+# Create benchmark directories
+RUN mkdir -p /app/benchmarks/results && \
+    mkdir -p /app/benchmarks/profiles && \
+    chown -R lighthouse:lighthouse /app/benchmarks
+
+USER lighthouse
+
+# Benchmark-specific environment
+ENV LIGHTHOUSE_ENV=benchmark \
+    LIGHTHOUSE_FUSE_BENCHMARK=true \
+    LIGHTHOUSE_FUSE_PARALLEL_TEST=true \
+    LIGHTHOUSE_BENCHMARK_ITERATIONS=100 \
+    LIGHTHOUSE_BENCHMARK_OUTPUT=/app/benchmarks/results

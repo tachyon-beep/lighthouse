@@ -1,0 +1,109 @@
+# Lighthouse Bridge Configuration Template
+# Environment variables are substituted at runtime
+
+# Application settings
+app:
+  name: lighthouse-bridge
+  version: ${VERSION:-1.0.0}
+  environment: ${LIGHTHOUSE_ENV:-production}
+  debug: ${LIGHTHOUSE_DEBUG:-false}
+
+# Server configuration
+server:
+  host: 0.0.0.0
+  port: 8765
+  websocket_port: 8766
+  workers: ${LIGHTHOUSE_WORKERS:-2}
+  keepalive_timeout: 65
+  max_connections: ${LIGHTHOUSE_MAX_CONNECTIONS:-1000}
+
+# Bridge components
+bridge:
+  project_id: ${LIGHTHOUSE_PROJECT_ID:-default_project}
+  mount_point: ${LIGHTHOUSE_MOUNT_POINT:-/mnt/lighthouse/project}
+  
+  # FUSE configuration
+  fuse:
+    foreground: ${LIGHTHOUSE_FUSE_FOREGROUND:-false}
+    allow_other: ${LIGHTHOUSE_FUSE_ALLOW_OTHER:-true}
+    auto_unmount: true
+    debug: ${LIGHTHOUSE_FUSE_DEBUG:-false}
+  
+  # Speed Layer settings
+  speed_layer:
+    memory_cache_size: ${LIGHTHOUSE_CACHE_SIZE:-10000}
+    expert_timeout: ${LIGHTHOUSE_EXPERT_TIMEOUT:-30.0}
+    ml_model_path: ${LIGHTHOUSE_ML_MODEL_PATH:-}
+    
+  # Session security
+  security:
+    secret_key: ${LIGHTHOUSE_SECRET_KEY:-lighthouse_default_secret}
+    session_timeout: ${LIGHTHOUSE_SESSION_TIMEOUT:-3600}
+    max_concurrent_sessions: ${LIGHTHOUSE_MAX_CONCURRENT_SESSIONS:-10}
+
+# External services
+redis:
+  url: ${REDIS_URL:-redis://localhost:6379/0}
+  connection_pool:
+    max_connections: 20
+    retry_on_timeout: true
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
+
+postgres:
+  url: ${POSTGRES_URL:-postgresql://lighthouse:lighthouse@localhost:5432/lighthouse}
+  pool:
+    min_size: 5
+    max_size: 20
+    command_timeout: 60
+
+# Monitoring and observability
+monitoring:
+  metrics:
+    enabled: true
+    port: ${PROMETHEUS_METRICS_PORT:-9090}
+    path: /metrics
+    
+  health_check:
+    enabled: true
+    path: /health
+    detailed_path: /health/detailed
+    
+  logging:
+    level: ${LIGHTHOUSE_LOG_LEVEL:-INFO}
+    format: json
+    output: ${LIGHTHOUSE_LOG_OUTPUT:-stdout}
+    file: ${LIGHTHOUSE_LOG_FILE:-/app/logs/bridge.log}
+    rotation:
+      max_size: 100MB
+      backup_count: 5
+    
+  tracing:
+    enabled: ${LIGHTHOUSE_TRACING_ENABLED:-true}
+    jaeger_endpoint: ${JAEGER_ENDPOINT:-http://localhost:14268/api/traces}
+    sampling_rate: ${LIGHTHOUSE_TRACING_SAMPLING_RATE:-0.1}
+
+# Performance tuning
+performance:
+  # Memory management
+  memory:
+    max_heap_size: ${LIGHTHOUSE_MAX_HEAP_SIZE:-512MB}
+    gc_threshold: 1000
+    
+  # Connection pooling
+  connections:
+    max_worker_connections: 1000
+    keepalive_timeout: 75
+    
+  # Background tasks
+  background_tasks:
+    performance_monitoring_interval: 30
+    cleanup_interval: 300
+    health_check_interval: 60
+
+# Feature flags
+features:
+  expert_coordination: ${LIGHTHOUSE_FEATURE_EXPERT_COORDINATION:-true}
+  ast_anchoring: ${LIGHTHOUSE_FEATURE_AST_ANCHORING:-true}
+  time_travel_debug: ${LIGHTHOUSE_FEATURE_TIME_TRAVEL:-true}
+  pair_programming: ${LIGHTHOUSE_FEATURE_PAIR_PROGRAMMING:-true}

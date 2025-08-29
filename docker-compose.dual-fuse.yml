@@ -1,0 +1,329 @@
+version: '3.8'
+
+services:
+  lighthouse-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.dual-fuse
+      target: runtime
+      args:
+        - FUSE_MIGRATION_MODE=dual
+    container_name: lighthouse-bridge-dual
+    hostname: lighthouse-bridge
+    cap_add:
+      - SYS_ADMIN  # Required for FUSE mount
+    devices:
+      - /dev/fuse:/dev/fuse  # FUSE device access
+    security_opt:
+      - apparmor:unconfined  # Required for FUSE in some systems
+    ports:
+      - "8765:8765"  # Bridge API port
+      - "8766:8766"  # Shadow instance port (for parallel testing)
+      - "9100:9100"  # Metrics port
+    volumes:
+      # Event store persistence
+      - lighthouse-events:/var/lib/lighthouse/events
+      - lighthouse-snapshots:/var/lib/lighthouse/snapshots
+      
+      # tmpfs for FUSE cache (performance optimization)
+      - type: tmpfs
+        target: /var/lib/lighthouse/cache
+        tmpfs:
+          size: 1G  # Increased for dual backend testing
+      
+      # Project files (read-only bind mount)
+      - ./:/project:ro
+      
+      # Primary FUSE mount point
+      - type: bind
+        source: /tmp/lighthouse-mount
+        target: /mnt/lighthouse
+        bind:
+          propagation: shared
+      
+      # Shadow mount point for parallel testing
+      - type: bind
+        source: /tmp/lighthouse-shadow
+        target: /mnt/lighthouse/shadow
+        bind:
+          propagation: shared
+      
+      # Logs and benchmarks
+      - ./logs:/app/logs
+      - ./benchmarks:/app/benchmarks
+    environment:
+      # Core configuration
+      - LIGHTHOUSE_ENV=development
+      - LIGHTHOUSE_LOG_LEVEL=DEBUG
+      - LIGHTHOUSE_PORT=8765
+      - LIGHTHOUSE_HOST=0.0.0.0
+      
+      # FUSE backend configuration
+      - LIGHTHOUSE_FUSE_BACKEND=fusepy      # Primary backend (current)
+      - LIGHTHOUSE_FUSE_FALLBACK=pyfuse3    # Fallback backend
+      - LIGHTHOUSE_FUSE_BENCHMARK=false     # Enable for performance testing
+      - LIGHTHOUSE_FUSE_PARALLEL_TEST=false # Enable for parallel comparison
+      - LIGHTHOUSE_FUSE_DEBUG=false         # Enable for verbose FUSE logging
+      
+      # Path configuration
+      - LIGHTHOUSE_PROJECT_PATH=/project
+      - LIGHTHOUSE_MOUNT_POINT=/mnt/lighthouse/project
+      - LIGHTHOUSE_EVENT_STORE_PATH=/var/lib/lighthouse/events
+      - LIGHTHOUSE_SNAPSHOT_PATH=/var/lib/lighthouse/snapshots
+      - LIGHTHOUSE_CACHE_PATH=/var/lib/lighthouse/cache
+      
+      # FUSE-specific settings
+      - LIGHTHOUSE_FUSE_FOREGROUND=false
+      - LIGHTHOUSE_FUSE_ALLOW_OTHER=true
+      - LIGHTHOUSE_FUSE_MAX_READAHEAD=131072  # 128KB readahead
+      - LIGHTHOUSE_FUSE_MAX_WRITE=131072      # 128KB max write
+      
+      # Performance tuning
+      - LIGHTHOUSE_CACHE_TTL=60
+      - LIGHTHOUSE_CACHE_SIZE=10000
+      - LIGHTHOUSE_WORKER_THREADS=4
+      
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "/usr/local/bin/validate-fuse-backend.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - lighthouse-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'  # Increased for dual backend operation
+          memory: 2G    # Increased for parallel testing
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Development environment with both backends
+  lighthouse-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dual-fuse
+      target: development
+    container_name: lighthouse-dev
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE  # For debugging
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+      - seccomp:unconfined  # For debugging tools
+    ports:
+      - "8767:8765"  # Development API port
+      - "9101:9100"  # Development metrics port
+    volumes:
+      # Source code mounted read-write for development
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      
+      # Development data volumes
+      - lighthouse-dev-events:/var/lib/lighthouse/events
+      - lighthouse-dev-snapshots:/var/lib/lighthouse/snapshots
+      
+      # Benchmark results
+      - ./benchmarks:/app/benchmarks
+      - ./logs:/app/logs
+      
+      # FUSE mounts
+      - /tmp/lighthouse-dev:/mnt/lighthouse
+    environment:
+      - LIGHTHOUSE_ENV=development
+      - LIGHTHOUSE_LOG_LEVEL=DEBUG
+      - LIGHTHOUSE_FUSE_BACKEND=${FUSE_BACKEND:-fusepy}
+      - LIGHTHOUSE_FUSE_FALLBACK=${FUSE_FALLBACK:-pyfuse3}
+      - LIGHTHOUSE_FUSE_DEBUG=true
+      - LIGHTHOUSE_FUSE_BENCHMARK=true
+      - LIGHTHOUSE_FUSE_PARALLEL_TEST=true
+      - PYTHONDONTWRITEBYTECODE=1
+    profiles:
+      - development
+    networks:
+      - lighthouse-network
+
+  # Benchmark environment for performance testing
+  lighthouse-benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile.dual-fuse
+      target: benchmark
+    container_name: lighthouse-benchmark
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./benchmarks:/app/benchmarks
+      - ./src:/app/src:ro
+      - /tmp/lighthouse-bench:/mnt/lighthouse
+    environment:
+      - LIGHTHOUSE_ENV=benchmark
+      - LIGHTHOUSE_FUSE_BENCHMARK=true
+      - LIGHTHOUSE_FUSE_PARALLEL_TEST=true
+      - LIGHTHOUSE_BENCHMARK_ITERATIONS=1000
+      - LIGHTHOUSE_BENCHMARK_WARMUP=100
+    profiles:
+      - benchmark
+    networks:
+      - lighthouse-network
+    command: ["python", "-m", "lighthouse.benchmarks.full_suite"]
+
+  # Migration testing environment - runs both backends
+  lighthouse-migration-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.dual-fuse
+      target: runtime
+    container_name: lighthouse-migration
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./src:/app/src:ro
+      - migration-results:/app/migration
+    environment:
+      - LIGHTHOUSE_ENV=test
+      - LIGHTHOUSE_MIGRATION_TEST=true
+      - LIGHTHOUSE_FUSE_PARALLEL_TEST=true
+    profiles:
+      - migration
+    networks:
+      - lighthouse-network
+    command: ["python", "-m", "lighthouse.migration.validate_backends"]
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: lighthouse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --appendfsync everysec
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # PostgreSQL for production event store
+  postgres:
+    image: postgres:15-alpine
+    container_name: lighthouse-postgres
+    environment:
+      - POSTGRES_DB=lighthouse
+      - POSTGRES_USER=lighthouse
+      - POSTGRES_PASSWORD=lighthouse_secret
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Prometheus for monitoring both backends
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: lighthouse-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus-dual.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Grafana with dual-backend dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: lighthouse-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=lighthouse
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - ./config/grafana/dashboards-dual:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  lighthouse-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  # Production volumes
+  lighthouse-events:
+    driver: local
+  lighthouse-snapshots:
+    driver: local
+    
+  # Development volumes
+  lighthouse-dev-events:
+    driver: local
+  lighthouse-dev-snapshots:
+    driver: local
+    
+  # Migration test results
+  migration-results:
+    driver: local
+    
+  # Service data volumes
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

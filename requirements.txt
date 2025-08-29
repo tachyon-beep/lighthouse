@@ -1,5 +1,22 @@
-# Production dependencies
-mcp>=1.0.0
-pydantic>=2.0.0
-requests>=2.31.0
-aiohttp>=3.8.0
+# Lighthouse Bridge Requirements
+
+# Core dependencies
+aiofiles==24.1.0
+fusepy==3.0.1
+aiosqlite==0.20.0
+pydantic==2.7.4
+
+# FastAPI for health endpoints
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# Security
+cryptography==42.0.8
+
+# Serialization
+msgpack==1.0.8
+
+# Utilities
+python-dotenv==1.0.1
+aiohttp==3.9.5
+psutil==5.9.8

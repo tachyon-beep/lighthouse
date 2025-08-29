@@ -1,192 +1,121 @@
 # Integration Specialist Working Memory
 
-## Current Status - MCP Authentication Remediation Integration Validation
+## Current Task: Permission System Finalization
+Date: 2025-08-26
 
-**Date**: 2025-08-26  
-**Task**: Comprehensive integration validation and sign-off on MCP authentication remediation plan
+### Critical Integration Requirements
 
-## 🎯 INTEGRATION VALIDATION COMPLETE - CONDITIONALLY APPROVED
+#### From HLD Architecture (Lines 70-89):
+- **Builder Agents**: Direct filesystem access, execute commands directly
+- **Expert Agents**: NO filesystem access, only FUSE shadow access via `/mnt/lighthouse/project/`
+- **Bridge**: Persistent daemon maintaining project mirrors
+- **Authentication**: HMAC-SHA256 based
 
-### MCP Authentication Remediation Integration Assessment
+#### From auth.py Analysis:
+Current permissions defined:
+- Event Store: READ_EVENTS, WRITE_EVENTS, QUERY_EVENTS, ADMIN_ACCESS, HEALTH_CHECK
+- Expert: EXPERT_COORDINATION
+- File: FILE_READ, FILE_WRITE (ambiguous - needs clarification)
+- Command: COMMAND_EXECUTION, COMMAND_VALIDATION
+- System: SYSTEM_ADMIN, SYSTEM_CONFIG
+- Agent: BRIDGE_ACCESS, CONTEXT_SHARING, SESSION_MANAGEMENT
+- Security: AUDIT_ACCESS, SECURITY_REVIEW
 
-**Integration Pattern Evaluated**: CoordinatedAuthenticator with Event-Driven State Propagation
-**Certificate Issued**: `comprehensive_mcp_authentication_remediation_validation_lighthouse_coordination_20250826_064000.md`
-
-#### **CONDITIONAL APPROVAL Decision Rationale**
-
-The remediation plan demonstrates **EXCELLENT integration design** with proper component coordination:
-
-✅ **Integration Architecture Strengths**:
-- **CoordinatedAuthenticator singleton** properly centralizes authentication state 
-- **Event-driven state propagation** ensures immediate synchronization across EventStore instances
-- **Clean component boundaries** with minimal interface disruption  
-- **Scalable foundation** for Phase 2 Global Authentication Registry evolution
-- **Comprehensive error handling** with graceful degradation patterns
-
-⚠️ **Critical Implementation Conditions Required**:
-- **Security vulnerability elimination** - Remove ALL auto-authentication bypasses (4 hours)
-- **Thread-safe coordinator implementation** - Proper asyncio locking patterns (8 hours) 
-- **Component integration updates** - EventStore, Bridge, and MCP server coordination (16 hours)
-- **End-to-end integration testing** - Multi-component authentication flow validation (24 hours)
-
-### Integration Coordination Analysis Summary
-
-#### **1. Component Integration Flow**
-```
-CoordinatedAuthenticator (Singleton)
-    ↓ (shared authentication state)
-EventStore A ← → Registration → EventStore B ← → EventStore N
-    ↓ (immediate state propagation)
-Bridge Components (MCP Server, SessionManager, Commands)
-    ↓ (coordinated authentication) 
-MCP Client Operations (All using synchronized authentication)
-```
-
-#### **2. Critical Security Integration Fixes**
-- **Authentication State Isolation**: RESOLVED via shared coordinator
-- **Auto-Authentication Bypasses**: ELIMINATED through strict validation
-- **EventStore Singleton Pattern**: PROPERLY IMPLEMENTED with coordination
-- **Session-Command Disconnect**: RESOLVED through shared authentication state
-
-#### **3. Integration Testing Strategy Validated**
+#### From coordinator.py Requirements (Lines 241-243):
+Required permissions check:
 ```python
-async def test_mcp_authentication_coordination():
-    # Multi-bridge authentication coordination test
-    bridge1, bridge2 = create_multiple_bridges()
-    session = create_session_via_bridge1(agent_id="test_agent")
-    
-    # CRITICAL: This should work without "Agent not authenticated" 
-    result = execute_command_via_bridge2(session_token)
-    assert result is not None  # Integration coordination SUCCESS
+required_perms = [Permission.EXPERT_COORDINATION, Permission.COMMAND_EXECUTION]
 ```
 
-#### **4. Performance Integration Assessment**
-- **Authentication Coordination Overhead**: <5% expected impact
-- **State Propagation Latency**: <10ms for 95th percentile
-- **Memory Usage**: Minimal increase for shared authentication state
-- **Component Initialization**: Proper dependency ordering maintained
+Also checks in validation (Lines 595-605):
+- FILE_WRITE permissions
+- FILE_READ permissions
+- COMMAND_EXECUTION permissions
+- SYSTEM_ADMIN for sensitive paths
 
-### Implementation Roadmap Validation
+#### From mcp_server.py Integration (Lines 398-402):
+Expert registration creates EXPERT_AGENT role with:
+- Configurable permissions list
+- Expert-specific capabilities
+- Virtual filesystem access mode
 
-#### **Phase 1: Critical Fix (0-24 hours) - MANDATORY CONDITIONS**
-1. **Security Bypass Elimination** (0-4 hours) - Remove auto-authentication patterns
-2. **CoordinatedAuthenticator Implementation** (4-8 hours) - Thread-safe singleton 
-3. **Component Integration** (8-16 hours) - EventStore, Bridge, MCP server updates
-4. **Integration Testing** (16-24 hours) - End-to-end validation
+### Critical Issues to Resolve
 
-#### **Phase 2: Enhanced Integration (1-2 weeks) - EVOLUTION READY**  
-1. **Authentication Event Bus** - Advanced event-driven patterns
-2. **Integration Health Monitoring** - Authentication consistency validation
-3. **Performance Optimization** - Reduce coordination overhead
-4. **Error Recovery Patterns** - Advanced failure handling
+1. **Ambiguous FILE_READ/FILE_WRITE permissions**:
+   - Currently used for both real filesystem AND shadow filesystem
+   - HLD specifies experts should ONLY have shadow access
+   - Need separate permissions: SHADOW_READ, SHADOW_WRITE vs FILESYSTEM_READ, FILESYSTEM_WRITE
 
-#### **Phase 3: Production Integration (2-4 weeks) - SCALABLE**
-1. **Global Authentication Registry** - Service registry pattern  
-2. **Distributed Authentication** - Multi-instance coordination
-3. **Circuit Breaker Patterns** - Resilience improvements
-4. **Load Testing Validation** - Performance under coordination load
+2. **Missing Builder Agent Permissions**:
+   - No clear distinction between builder and expert filesystem access
+   - Builders need direct filesystem permissions
+   - Experts need shadow-only permissions
 
-## 🔄 COORDINATION PATTERNS ANALYSIS
+3. **Coordinator Validation Gaps**:
+   - Lines 595-605 check FILE_WRITE but doesn't distinguish shadow vs real
+   - Sensitive path checks assume filesystem access
 
-### Event-Driven Authentication State Management
+### Proposed Solution
+
+#### New Permission Structure:
 ```python
-class CoordinatedAuthenticator:
-    def authenticate_agent(self, agent_id: str, token: str, role: AgentRole):
-        # Primary authentication
-        identity = self.authenticator.authenticate(agent_id, token, role)
-        
-        # Event-driven state propagation - IMMEDIATE
-        for eventstore in self._eventstore_subscribers:
-            eventstore.authenticator._authenticated_agents[agent_id] = identity
-            
-        return identity
+# Shadow Filesystem (for Experts via FUSE)
+SHADOW_READ = "shadow:read"        # Read from /mnt/lighthouse/project/
+SHADOW_WRITE = "shadow:write"      # Write to shadow filesystem
+SHADOW_ANNOTATE = "shadow:annotate" # Add annotations to shadows
+
+# Direct Filesystem (for Builders ONLY)
+FILESYSTEM_READ = "filesystem:read"   # Direct filesystem read
+FILESYSTEM_WRITE = "filesystem:write" # Direct filesystem write
+FILESYSTEM_EXECUTE = "filesystem:execute" # Execute filesystem commands
+
+# Keep existing Event Store, Command, System permissions
 ```
 
-**Integration Benefits**:
-- **Immediate Consistency**: Authentication state synchronized across all components
-- **No Message Delays**: Direct memory update pattern for low latency  
-- **Failure Isolation**: Single authentication failure doesn't cascade
-- **Clean Recovery**: Component restart automatically re-registers
+#### Role Permission Updates:
+- **GUEST**: SHADOW_READ only
+- **AGENT (Builder)**: FILESYSTEM_*, COMMAND_*, EVENT_*
+- **EXPERT_AGENT**: SHADOW_*, EXPERT_COORDINATION, no FILESYSTEM_*
+- **SYSTEM_AGENT**: Both SHADOW_* and FILESYSTEM_*
+- **ADMIN**: Everything
 
-### Component Lifecycle Coordination
-```python
-# EventStore Integration Pattern
-async def __init__(self, ...):
-    # Get shared coordinator instead of creating isolated authenticator
-    self.coordinated_auth = await CoordinatedAuthenticator.get_instance(auth_secret)
-    self.authenticator = self.coordinated_auth.authenticator
-    
-    # Register for authentication coordination
-    self.coordinated_auth.register_eventstore(self)
-```
+### Integration Points Requiring Updates
 
-**Integration Validation**:
-- **Dependency Injection**: Clean sharing of authentication state
-- **Registration Pattern**: Components automatically participate in coordination  
-- **State Synchronization**: Existing authentication immediately available
-- **Component Independence**: EventStore functionality unchanged
+1. **auth.py (Lines 136-204)**: Update role_permissions dict
+2. **auth.py (Lines 490-522)**: Update authorize_file_access method
+3. **coordinator.py (Lines 595-605)**: Update validation to check shadow vs filesystem
+4. **mcp_server.py (Lines 398-402)**: Ensure experts get SHADOW_* not FILE_*
 
-### Integration Health Monitoring Design
-```python
-class AuthenticationIntegrationMonitor:
-    def check_authentication_consistency(self):
-        """Validate authentication state across all EventStore instances"""
-        primary_agents = set(coordinator.authenticator._authenticated_agents.keys())
-        
-        for eventstore in coordinator._eventstore_subscribers:
-            eventstore_agents = set(eventstore.authenticator._authenticated_agents.keys()) 
-            if eventstore_agents != primary_agents:
-                # Report consistency failure for remediation
-                return {"status": "inconsistent", "details": inconsistencies}
-                
-        return {"status": "consistent", "instances": len(subscribers)}
-```
+### Next Actions
+1. Finalize permission names and structure
+2. Update auth.py with new permissions
+3. Update coordinator validation logic
+4. Test with MCP server integration
+5. Document permission model clearly
 
-## 🚀 INTEGRATION SPECIALIST FINAL ASSESSMENT
+## Historical Context
 
-### Problem Complexity: HIGH
-- Multiple component integration boundaries requiring careful coordination
-- Authentication state management across distributed EventStore instances
-- Event-driven architecture patterns for real-time state synchronization
-- Security vulnerability elimination while maintaining system stability
+### Previous Issues
+- MCP server authentication crisis (resolved)
+- Direct EventStore integration without proper auth
+- Confusion between shadow and real filesystem access
 
-### Solution Quality: EXCELLENT  
-- **CoordinatedAuthenticator pattern** provides immediate and scalable solution
-- **Event-driven state propagation** ensures proper multi-agent coordination
-- **Minimal interface changes** preserve existing component functionality
-- **Clear evolution path** to production-grade authentication architectures
+### Decisions Made
+- Use HMAC-SHA256 for session security
+- EventStore as central audit log
+- FUSE mount at /mnt/lighthouse/project/ for experts
+- Separate Builder vs Expert agent roles
 
-### Implementation Risk: MEDIUM
-- **Security bypass elimination** requires careful removal of auto-authentication
-- **Component initialization ordering** needs proper dependency management
-- **Thread safety coordination** requires proper asyncio locking patterns
-- **Integration testing complexity** across multiple component boundaries
+### Current System State
+- Bridge components working
+- Event store operational
+- Expert coordinator functional
+- Permission system needs clarity on filesystem vs shadow access
 
-### Business Impact: CRITICAL FIX  
-- **MCP functionality restoration** - Core system operations currently blocked
-- **Security vulnerability elimination** - Multiple critical bypasses resolved
-- **Production deployment enablement** - Removes security deployment blockers
-- **Multi-agent coordination improvement** - Enables proper agent collaboration
+## Previous Integration Work
 
-## 📋 INTEGRATION DECISION MATRIX
-
-| Integration Aspect | Assessment | Risk Level | Implementation Priority |
-|-------------------|------------|------------|------------------------|
-| Authentication State Coordination | EXCELLENT | LOW | CRITICAL |
-| Component Interface Design | EXCELLENT | LOW | HIGH |
-| Security Vulnerability Resolution | CRITICAL_FIX | HIGH | IMMEDIATE |
-| Performance Integration Impact | ACCEPTABLE | MEDIUM | HIGH |
-| Evolution Architecture Foundation | EXCELLENT | LOW | MEDIUM |
-| Integration Testing Strategy | COMPREHENSIVE | MEDIUM | HIGH |
-| Error Handling & Recovery | ROBUST | MEDIUM | HIGH |
-
-## INTEGRATION SPECIALIST STATUS: COMPREHENSIVE REMEDIATION VALIDATION COMPLETE
-
-**🎯 Decision**: CONDITIONALLY_APPROVED - Excellent integration design with mandatory implementation conditions
-**⚡ Priority**: CRITICAL - Core MCP functionality restoration with security vulnerability elimination  
-**🛠️ Readiness**: Implementation roadmap validated, conditions clearly defined, architecture evolution-ready
-**🔒 Security**: Critical vulnerabilities addressed through proper coordination architecture
-
-The MCP authentication remediation plan provides an exemplary integration solution that addresses both immediate production blockers and establishes a solid foundation for long-term authentication architecture evolution. The CoordinatedAuthenticator pattern demonstrates sophisticated understanding of multi-component coordination while maintaining clean architectural boundaries.
-
-**APPROVAL CONDITIONS must be met within 24 hours** to ensure production readiness and security vulnerability elimination.
+### MCP Direct EventStore Integration (Completed Earlier Today)
+- **Status**: APPROVED and implemented
+- **Pattern**: Direct EventStore with CoordinatedAuthenticator preservation
+- **Certificate**: `mcp_direct_eventstore_integration_validation_lighthouse_coordination_20250826_042400.md`
+- **Result**: MCP server now works with direct EventStore access

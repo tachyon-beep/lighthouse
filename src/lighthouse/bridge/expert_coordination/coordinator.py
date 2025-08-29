@@ -238,7 +238,8 @@ class SecureExpertCoordinator:
         """
         try:
             # Validate agent identity has required permissions
-            required_perms = [Permission.EXPERT_COORDINATION, Permission.COMMAND_EXECUTION]
+            # Experts only need EXPERT_COORDINATION, not COMMAND_EXECUTION
+            required_perms = [Permission.EXPERT_COORDINATION]
             for perm in required_perms:
                 if perm not in agent_identity.permissions:
                     await self._log_auth_failure(agent_identity.agent_id, "insufficient_permissions")
@@ -574,6 +575,9 @@ class SecureExpertCoordinator:
     async def _validate_command_security(self, command_type: str, command_data: Dict[str, Any], requester: RegisteredExpert) -> Tuple[bool, str]:
         """Validate command meets security requirements"""
         try:
+            # Import AgentRole for checking agent type
+            from ...event_store.auth import AgentRole
+            
             # Check if command type is allowed
             dangerous_commands = ['rm', 'sudo', 'chmod 777', 'dd', 'mkfs', 'fdisk']
             command_text = str(command_data.get('command', ''))
@@ -592,9 +596,18 @@ class SecureExpertCoordinator:
                         return False, f"Access to {dangerous_path} requires elevated permissions"
             
             # Check requester permissions for command type
+            # Expert agents work on shadows, builders work on filesystem
+            is_expert = requester.agent_identity.role == AgentRole.EXPERT_AGENT
+            
             required_permissions = {
-                'file_write': [Permission.FILE_WRITE],
-                'file_read': [Permission.FILE_READ],
+                'file_write': [Permission.SHADOW_WRITE if is_expert else Permission.FILESYSTEM_WRITE],
+                'file_read': [Permission.SHADOW_READ if is_expert else Permission.FILESYSTEM_READ],
+                'shadow_write': [Permission.SHADOW_WRITE],
+                'shadow_read': [Permission.SHADOW_READ],
+                'shadow_annotate': [Permission.SHADOW_ANNOTATE],
+                'filesystem_write': [Permission.FILESYSTEM_WRITE],
+                'filesystem_read': [Permission.FILESYSTEM_READ],
+                'filesystem_execute': [Permission.FILESYSTEM_EXECUTE],
                 'command_execution': [Permission.COMMAND_EXECUTION],
                 'system_admin': [Permission.SYSTEM_ADMIN]
             }

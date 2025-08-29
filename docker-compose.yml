@@ -1,0 +1,179 @@
+version: '3.8'
+
+services:
+  lighthouse-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: lighthouse-bridge
+    hostname: lighthouse-bridge
+    cap_add:
+      - SYS_ADMIN  # Required for FUSE mount
+    devices:
+      - /dev/fuse:/dev/fuse  # FUSE device access
+    security_opt:
+      - apparmor:unconfined  # Required for FUSE in some systems
+    ports:
+      - "8765:8765"  # Bridge API port
+    volumes:
+      # Event store persistence
+      - lighthouse-events:/var/lib/lighthouse/events
+      - lighthouse-snapshots:/var/lib/lighthouse/snapshots
+      
+      # tmpfs for FUSE cache (performance optimization)
+      - type: tmpfs
+        target: /var/lib/lighthouse/cache
+        tmpfs:
+          size: 512M
+      
+      # Project files (read-only bind mount)
+      - ./:/project:ro
+      
+      # FUSE mount point (with shared propagation)
+      - type: bind
+        source: /tmp/lighthouse-mount
+        target: /mnt/lighthouse
+        bind:
+          propagation: shared
+      
+      # Logs
+      - ./logs:/app/logs
+    environment:
+      - LIGHTHOUSE_ENV=development
+      - LIGHTHOUSE_LOG_LEVEL=DEBUG
+      - LIGHTHOUSE_PORT=8765
+      - LIGHTHOUSE_HOST=0.0.0.0
+      - LIGHTHOUSE_PROJECT_PATH=/project
+      - LIGHTHOUSE_MOUNT_POINT=/mnt/lighthouse/project
+      - LIGHTHOUSE_EVENT_STORE_PATH=/var/lib/lighthouse/events
+      - LIGHTHOUSE_SNAPSHOT_PATH=/var/lib/lighthouse/snapshots
+      - LIGHTHOUSE_CACHE_PATH=/var/lib/lighthouse/cache
+      - LIGHTHOUSE_FUSE_FOREGROUND=false
+      - LIGHTHOUSE_FUSE_ALLOW_OTHER=true
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - lighthouse-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: lighthouse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --appendfsync everysec
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # Optional: PostgreSQL for production event store
+  postgres:
+    image: postgres:15-alpine
+    container_name: lighthouse-postgres
+    environment:
+      - POSTGRES_DB=lighthouse
+      - POSTGRES_USER=lighthouse
+      - POSTGRES_PASSWORD=lighthouse_secret
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Optional: Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: lighthouse-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: lighthouse-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=lighthouse
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - lighthouse-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  lighthouse-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  lighthouse-events:
+    driver: local
+  lighthouse-snapshots:
+    driver: local
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

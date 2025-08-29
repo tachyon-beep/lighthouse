@@ -1,0 +1,71 @@
+# Lighthouse Bridge Requirements with Dual FUSE Support
+# This configuration supports both fusepy (FUSE2) and pyfuse3 (FUSE3) during migration
+
+# Core dependencies
+aiofiles==24.1.0
+aiosqlite==0.20.0
+pydantic==2.7.4
+
+# FUSE backends (both installed during transition)
+fusepy==3.0.1  # FUSE2 backend (current, will be deprecated)
+pyfuse3==3.3.0  # FUSE3 backend (migration target)
+
+# Async support for pyfuse3
+trio==0.25.1  # Required by pyfuse3 for async operations
+trio-asyncio==0.14.0  # Bridge between trio and asyncio
+
+# FastAPI for health endpoints
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# Security
+cryptography==42.0.8
+
+# Serialization
+msgpack==1.0.8
+orjson==3.10.3  # Faster JSON for performance testing
+
+# Machine Learning and Analysis (optional but recommended)
+scikit-learn==1.5.0
+numpy==1.26.4
+scipy==1.13.1
+pandas==2.2.2  # For benchmark result analysis
+
+# Code Analysis (optional but recommended)  
+tree-sitter==0.21.3
+tree-sitter-python==0.21.0
+tree-sitter-javascript==0.21.0
+tree-sitter-typescript==0.21.1
+tree-sitter-rust==0.21.2
+tree-sitter-go==0.21.0
+
+# Utilities
+python-dotenv==1.0.1
+aiohttp==3.9.5
+psutil==5.9.8
+click==8.1.7  # For CLI tools
+rich==13.7.1  # For better console output
+
+# Monitoring and Metrics
+prometheus-client==0.20.0
+opentelemetry-api==1.24.0
+opentelemetry-sdk==1.24.0
+opentelemetry-instrumentation-fastapi==0.45b0
+
+# Testing (for container-based tests)
+pytest==8.2.2
+pytest-asyncio==0.23.7
+pytest-benchmark==4.0.0
+pytest-cov==5.0.0
+pytest-mock==3.14.0
+
+# Development tools (included in main image for transition period)
+black==24.4.2
+mypy==1.10.0
+ruff==0.4.8
+ipython==8.24.0
+
+# Performance profiling
+memory-profiler==0.61.0
+line-profiler==4.1.2
+py-spy==0.3.14

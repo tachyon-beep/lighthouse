@@ -1,0 +1,818 @@
+#!/usr/bin/env python3
+"""
+Lighthouse MCP Server - Thin Bridge Adapter
+
+This is a thin FastMCP adapter that connects to the actual LighthouseBridge.
+All functionality is delegated to the Bridge - no reimplementation.
+"""
+
+import asyncio
+import json
+import logging
+import sys
+from typing import Any, Dict, List, Optional
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+
+# Import the actual Bridge and its components
+from lighthouse.bridge.main_bridge import LighthouseBridge
+from lighthouse.bridge.expert_coordination.coordinator import ExpertCoordinator
+from lighthouse.bridge.security.session_security import SessionSecurityValidator
+from lighthouse.event_store import EventStore, Event, EventType
+
+# Setup logging
+logger = logging.getLogger("lighthouse.mcp")
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter('[MCP] %(asctime)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+# Create FastMCP server instance
+mcp = FastMCP("lighthouse-bridge")
+
+# Global Bridge instance
+bridge: Optional[LighthouseBridge] = None
+initialized = False
+
+
+async def ensure_bridge_initialized():
+    """Ensure the Bridge is started and ready"""
+    global bridge, initialized
+    
+    if initialized:
+        return True
+    
+    try:
+        logger.info("Initializing Lighthouse Bridge components...")
+        
+        # Try to create full Bridge, fall back to components if FUSE fails
+        try:
+            # Attempt full Bridge initialization
+            from lighthouse.bridge.main_bridge import LighthouseBridge
+            bridge = LighthouseBridge(
+                project_id="default_project",
+                mount_point="/mnt/lighthouse/project",
+                config={
+                    'fuse_foreground': False,
+                    'fuse_allow_other': True,
+                    'expert_timeout': 30.0
+                }
+            )
+            await bridge.start()
+            logger.info("✅ Full Bridge initialized with FUSE mount")
+            
+        except Exception as e:
+            if "FUSE" in str(e):
+                logger.warning("FUSE not available, initializing Bridge components directly")
+                
+                # Initialize components without FUSE
+                from lighthouse.event_store import EventStore
+                from lighthouse.bridge.security.session_security import SessionSecurityValidator
+                from lighthouse.bridge.expert_coordination.coordinator import SecureExpertCoordinator
+                from lighthouse.bridge.speed_layer import SpeedLayerDispatcher
+                
+                # Create minimal Bridge-like object with just the components we need
+                class MinimalBridge:
+                    def __init__(self):
+                        self.event_store = EventStore()
+                        self.session_security = SessionSecurityValidator(
+                            secret_key="lighthouse_secret",
+                            session_timeout=3600
+                        )
+                        self.expert_coordinator = SecureExpertCoordinator(self.event_store)
+                        self.speed_layer_dispatcher = SpeedLayerDispatcher()
+                        self.mount_point = "/tmp/lighthouse_shadows"
+                        self.pending_validations = {}
+                        self.is_running = True
+                    
+                    async def validate_command(self, command):
+                        return await self.speed_layer_dispatcher.validate(command)
+                    
+                    async def get_status(self):
+                        from types import SimpleNamespace
+                        return SimpleNamespace(
+                            mode="degraded_no_fuse",
+                            event_store_status="operational",
+                            speed_layer_status="operational",
+                            expert_coordinator_status="operational",
+                            fuse_mount_status="unavailable",
+                            uptime_seconds=0
+                        )
+                
+                bridge = MinimalBridge()
+                await bridge.event_store.initialize()
+                logger.info("✅ Bridge components initialized without FUSE")
+            else:
+                raise
+        
+        logger.info(f"   Event store: {bridge.event_store}")
+        logger.info(f"   Expert coordinator: {bridge.expert_coordinator}")
+        
+        initialized = True
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Bridge: {e}")
+        return False
+
+
+# ============================
+# Session Management Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_create_session(agent_id: str, ip_address: str = "", user_agent: str = "") -> str:
+    """Create authenticated session through Bridge security.
+    
+    Args:
+        agent_id: Unique agent identifier
+        ip_address: Client IP address
+        user_agent: User agent string
+    
+    Returns:
+        JSON with session details
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Use Bridge's session security
+        session = bridge.session_security.create_session(agent_id, ip_address, user_agent)
+        
+        return json.dumps({
+            "session_id": session.session_id,
+            "session_token": session.session_token,
+            "agent_id": agent_id,
+            "created_at": session.created_at,
+            "expires_at": session.created_at + 3600
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_validate_session(session_token: str, agent_id: str) -> str:
+    """Validate session through Bridge security.
+    
+    Args:
+        session_token: Session token to validate
+        agent_id: Agent ID to validate against
+    
+    Returns:
+        JSON with validation result
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        is_valid = bridge.session_security.validate_session(session_token, agent_id)
+        return json.dumps({"valid": is_valid, "agent_id": agent_id})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Command Validation Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_validate_command(tool_name: str, tool_input: Dict[str, Any], 
+                                     agent_id: str, session_token: str = "") -> str:
+    """Validate command through Bridge's speed layer and expert system.
+    
+    Args:
+        tool_name: Name of the tool/command
+        tool_input: Input parameters for the tool
+        agent_id: Agent requesting validation
+        session_token: Session token for auth
+    
+    Returns:
+        JSON with validation decision
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Validate through Bridge's speed layer
+        result = await bridge.validate_command({
+            'tool': tool_name,
+            'input': tool_input,
+            'agent_id': agent_id
+        })
+        
+        return json.dumps({
+            "status": result.status,
+            "reason": result.reason,
+            "latency_ms": result.latency_ms,
+            "tier": result.tier,
+            "expert_consulted": result.expert_consulted
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Multi-Agent Coordination Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_dispatch_task(target_agent: str, task: str, priority: str = "normal",
+                                  context: Optional[Dict[str, Any]] = None,
+                                  session_token: str = "") -> str:
+    """Dispatch task to specific agent through Bridge coordinator.
+    
+    Args:
+        target_agent: Agent ID to dispatch to
+        task: Task description
+        priority: Task priority level
+        context: Optional context data
+        session_token: Session token
+    
+    Returns:
+        JSON with dispatch result
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Dispatch through expert coordinator
+        result = await bridge.expert_coordinator.delegate_command(
+            command_type="task",
+            command_data={"task": task, "priority": priority, "context": context},
+            target_experts=[target_agent],
+            requester_id="mcp_client",
+            timeout=30.0
+        )
+        
+        return json.dumps({
+            "success": result.success,
+            "command_id": result.command_id,
+            "expert_responses": result.expert_responses
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_broadcast_message(message: str, agent_filter: Optional[List[str]] = None,
+                                      message_type: str = "info", session_token: str = "") -> str:
+    """Broadcast message to multiple agents.
+    
+    Args:
+        message: Message to broadcast
+        agent_filter: Optional list of agent IDs to send to
+        message_type: Type of message (info, command, alert)
+        session_token: Session token
+    
+    Returns:
+        JSON with broadcast result
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Get registered experts
+        experts = bridge.expert_coordinator.registered_experts
+        
+        if agent_filter:
+            experts = {k: v for k, v in experts.items() if k in agent_filter}
+        
+        # Send to each expert
+        results = {}
+        for agent_id in experts:
+            try:
+                # Use expert coordinator's messaging
+                result = await bridge.expert_coordinator.send_message(
+                    agent_id, message, message_type
+                )
+                results[agent_id] = {"success": True}
+            except Exception as e:
+                results[agent_id] = {"success": False, "error": str(e)}
+        
+        return json.dumps({
+            "broadcast_to": list(results.keys()),
+            "results": results
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_start_collaboration(task: str, agents: List[str], mode: str = "collaborative",
+                                        session_token: str = "") -> str:
+    """Start multi-agent collaboration session.
+    
+    Args:
+        task: Task description
+        agents: List of agent IDs to involve
+        mode: Collaboration mode
+        session_token: Session token
+    
+    Returns:
+        JSON with session details
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Start collaboration through coordinator
+        session_id = await bridge.expert_coordinator.start_collaboration_session(
+            initiator_id="mcp_client",
+            participants=agents,
+            task_description=task,
+            coordination_mode=mode
+        )
+        
+        return json.dumps({
+            "session_id": session_id,
+            "participants": agents,
+            "task": task,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Expert Registration & Coordination Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_register_expert(
+    expert_role: str,
+    capabilities: List[Dict[str, Any]],
+    permissions: List[str],
+    agent_metadata: Optional[Dict[str, Any]] = None
+) -> str:
+    """Register Claude instance as an expert agent with specific capabilities.
+    
+    Expert agents have access to broader information but only access code via virtual FS.
+    Regular agents have direct codebase access.
+    
+    Args:
+        expert_role: Expertise type (security, performance, architecture, testing, etc.)
+        capabilities: List of capability definitions
+        permissions: List of permissions (FILE_READ, EXPERT_COORDINATION, etc.)
+        agent_metadata: Optional metadata about the agent
+    
+    Returns:
+        JSON with registration result including auth token
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        from lighthouse.event_store.auth import AgentIdentity, AgentRole, Permission
+        from lighthouse.bridge.expert_coordination.coordinator import ExpertCapability
+        import hmac
+        import hashlib
+        from datetime import datetime
+        
+        # Generate unique agent ID
+        agent_id = f"mcp_expert_{expert_role}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create AgentIdentity - experts use EXPERT_AGENT role
+        agent_identity = AgentIdentity(
+            agent_id=agent_id,
+            role=AgentRole.EXPERT_AGENT,  # Expert role for virtual FS access
+            permissions=[Permission(p) for p in permissions],
+            metadata={**(agent_metadata or {}), "expertise": expert_role}
+        )
+        
+        # Convert capability dicts to ExpertCapability objects
+        expert_capabilities = []
+        for cap_dict in capabilities:
+            capability = ExpertCapability(
+                name=cap_dict['name'],
+                description=cap_dict.get('description', ''),
+                input_types=cap_dict.get('input_types', []),
+                output_types=cap_dict.get('output_types', []),
+                required_permissions=[Permission(p) for p in cap_dict.get('required_permissions', [])],
+                estimated_latency_ms=cap_dict.get('estimated_latency_ms', 1000.0),
+                confidence_threshold=cap_dict.get('confidence_threshold', 0.8)
+            )
+            expert_capabilities.append(capability)
+        
+        # Generate auth challenge
+        auth_secret = bridge.expert_coordinator.auth_secret
+        auth_challenge = hmac.new(
+            auth_secret,
+            f"{agent_id}:{int(datetime.now().timestamp())}".encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Register with expert coordinator
+        success, message, auth_token = await bridge.expert_coordinator.register_expert(
+            agent_identity=agent_identity,
+            capabilities=expert_capabilities,
+            auth_challenge=auth_challenge
+        )
+        
+        if success:
+            return json.dumps({
+                "success": True,
+                "agent_id": agent_id,
+                "auth_token": auth_token,
+                "message": message,
+                "capabilities_registered": len(expert_capabilities)
+            })
+        else:
+            return json.dumps({"success": False, "error": message})
+        
+    except Exception as e:
+        logger.error(f"Expert registration failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_discover_experts(
+    capability_filter: Optional[List[str]] = None,
+    status_filter: Optional[str] = None
+) -> str:
+    """Discover available expert agents and their capabilities.
+    
+    Args:
+        capability_filter: Optional list of required capabilities
+        status_filter: Optional status filter (available, busy, offline)
+    
+    Returns:
+        JSON with available experts
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        experts = []
+        for expert_id, expert in bridge.expert_coordinator.registered_experts.items():
+            # Apply filters
+            if status_filter and expert.status.value != status_filter:
+                continue
+            
+            if capability_filter:
+                expert_caps = {cap.name for cap in expert.capabilities}
+                if not all(req_cap in expert_caps for req_cap in capability_filter):
+                    continue
+            
+            experts.append({
+                "agent_id": expert_id,
+                "role": expert.agent_identity.metadata.get("expertise", "unknown"),
+                "status": expert.status.value,
+                "capabilities": [cap.name for cap in expert.capabilities],
+                "available": expert.is_available()
+            })
+        
+        return json.dumps({
+            "experts": experts,
+            "total_count": len(experts)
+        })
+        
+    except Exception as e:
+        logger.error(f"Expert discovery failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_delegate_to_expert(
+    command_type: str,
+    command_data: Dict[str, Any],
+    required_capabilities: List[str],
+    auth_token: str,
+    timeout: int = 30
+) -> str:
+    """Delegate command to capable expert with authentication.
+    
+    Args:
+        command_type: Type of command to delegate
+        command_data: Command parameters
+        required_capabilities: Capabilities needed
+        auth_token: Authentication token from registration
+        timeout: Command timeout in seconds
+    
+    Returns:
+        JSON with delegation result
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Delegate through coordinator
+        success, message, delegation_id = await bridge.expert_coordinator.delegate_command(
+            requester_token=auth_token,
+            command_type=command_type,
+            command_data=command_data,
+            required_capabilities=required_capabilities,
+            timeout_seconds=timeout
+        )
+        
+        if success:
+            return json.dumps({
+                "success": True,
+                "delegation_id": delegation_id,
+                "message": message
+            })
+        else:
+            return json.dumps({"success": False, "error": message})
+        
+    except Exception as e:
+        logger.error(f"Command delegation failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Expert Analysis Tools (via Bridge)
+# ============================
+
+@mcp.tool()
+async def lighthouse_request_expert_analysis(expert_type: str, target: str, 
+                                            context: Optional[Dict[str, Any]] = None,
+                                            session_token: str = "") -> str:
+    """Request analysis from specific expert through Bridge.
+    
+    Args:
+        expert_type: Type of expert (security, performance, architecture)
+        target: Target file or component to analyze
+        context: Optional analysis context
+        session_token: Session token
+    
+    Returns:
+        JSON with expert analysis
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Request through expert coordinator
+        result = await bridge.expert_coordinator.request_expert_analysis(
+            expert_type=expert_type,
+            target=target,
+            context=context or {}
+        )
+        
+        return json.dumps(result)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Event Store Tools (via Bridge)
+# ============================
+
+@mcp.tool()
+async def lighthouse_store_event(event_type: str, aggregate_id: str,
+                                data: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None,
+                                session_token: str = "") -> str:
+    """Store event through Bridge's event store.
+    
+    Args:
+        event_type: Type of event
+        aggregate_id: Aggregate identifier
+        data: Event data
+        metadata: Optional metadata
+        session_token: Session token
+    
+    Returns:
+        JSON with event details
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Store through Bridge's event store
+        event = Event(
+            event_type=EventType(event_type),
+            aggregate_id=aggregate_id,
+            aggregate_type="command",
+            data=data,
+            metadata=metadata or {},
+            source_agent="mcp_client",
+            source_component="mcp_server"
+        )
+        
+        await bridge.event_store.append(event)
+        
+        return json.dumps({
+            "success": True,
+            "event_id": str(event.event_id),
+            "sequence": event.sequence
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_query_events(event_types: Optional[List[str]] = None,
+                                 aggregate_ids: Optional[List[str]] = None,
+                                 limit: int = 10, session_token: str = "") -> str:
+    """Query events from Bridge's event store.
+    
+    Args:
+        event_types: Optional event type filter
+        aggregate_ids: Optional aggregate ID filter
+        limit: Maximum results
+        session_token: Session token
+    
+    Returns:
+        JSON with events
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Query through Bridge's event store
+        from lighthouse.event_store.models import EventQuery, EventFilter
+        
+        filter_obj = EventFilter(
+            event_types=[EventType(et) for et in event_types] if event_types else None,
+            aggregate_ids=aggregate_ids,
+            limit=limit
+        )
+        
+        query = EventQuery(filter=filter_obj, limit=limit)
+        result = await bridge.event_store.query(query)
+        
+        events_data = [
+            {
+                "event_id": str(event.event_id),
+                "event_type": event.event_type.value,
+                "aggregate_id": event.aggregate_id,
+                "timestamp": event.timestamp.isoformat(),
+                "data": event.data
+            }
+            for event in result.events
+        ]
+        
+        return json.dumps({
+            "events": events_data,
+            "total_count": result.total_count,
+            "has_more": result.has_more
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# FUSE Shadow Filesystem Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_read_shadow(file_path: str, session_token: str = "") -> str:
+    """Read file from Bridge's FUSE-mounted shadow filesystem.
+    
+    Args:
+        file_path: Path to read from shadow
+        session_token: Session token
+    
+    Returns:
+        JSON with file content
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Read from FUSE mount
+        shadow_path = Path(bridge.mount_point) / file_path
+        
+        if shadow_path.exists():
+            content = shadow_path.read_text()
+            return json.dumps({
+                "path": file_path,
+                "content": content,
+                "exists": True
+            })
+        else:
+            return json.dumps({
+                "path": file_path,
+                "exists": False,
+                "error": "File not found in shadow filesystem"
+            })
+            
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lighthouse_annotate_shadow(file_path: str, line: int, message: str,
+                                    category: str = "general", session_token: str = "") -> str:
+    """Add AST-anchored annotation through Bridge.
+    
+    Args:
+        file_path: File to annotate
+        line: Line number
+        message: Annotation message
+        category: Annotation category
+        session_token: Session token
+    
+    Returns:
+        JSON with annotation result
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized"})
+    
+    try:
+        # Add through AST anchor manager
+        anchor_id = await bridge.ast_anchor_manager.add_annotation(
+            file_path=file_path,
+            line_number=line,
+            message=message,
+            category=category,
+            agent_id="mcp_client"
+        )
+        
+        return json.dumps({
+            "success": True,
+            "anchor_id": anchor_id,
+            "file_path": file_path,
+            "line": line
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ============================
+# Bridge Status Tools
+# ============================
+
+@mcp.tool()
+async def lighthouse_get_bridge_status() -> str:
+    """Get comprehensive Bridge status.
+    
+    Returns:
+        JSON with Bridge status
+    """
+    await ensure_bridge_initialized()
+    
+    if not bridge:
+        return json.dumps({"error": "Bridge not initialized", "status": "down"})
+    
+    try:
+        status = await bridge.get_status()
+        
+        return json.dumps({
+            "status": "operational",
+            "bridge_mode": status.mode,
+            "components": {
+                "event_store": status.event_store_status,
+                "speed_layer": status.speed_layer_status,
+                "expert_coordinator": status.expert_coordinator_status,
+                "fuse_mount": status.fuse_mount_status
+            },
+            "active_agents": len(bridge.expert_coordinator.registered_experts),
+            "pending_validations": len(bridge.pending_validations),
+            "uptime_seconds": status.uptime_seconds
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": str(e), "status": "error"})
+
+
+def main():
+    """Main entry point for FastMCP Bridge adapter"""
+    logger.info("🚀 Lighthouse MCP Bridge Adapter starting...")
+    
+    # Run the FastMCP server
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

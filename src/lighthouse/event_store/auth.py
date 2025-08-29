@@ -14,12 +14,43 @@ from pydantic import BaseModel, Field
 
 
 class Permission(str, Enum):
-    """Event Store permissions."""
+    """Event Store and system permissions."""
+    # Event Store permissions
     READ_EVENTS = "events:read"
     WRITE_EVENTS = "events:write"
     QUERY_EVENTS = "events:query"
     ADMIN_ACCESS = "admin:access"
     HEALTH_CHECK = "health:check"
+    
+    # Expert coordination permissions
+    EXPERT_COORDINATION = "expert:coordination"
+    
+    # Shadow Filesystem permissions (for Expert Agents via FUSE mount)
+    SHADOW_READ = "shadow:read"        # Read from /mnt/lighthouse/project/
+    SHADOW_WRITE = "shadow:write"      # Write to shadow filesystem
+    SHADOW_ANNOTATE = "shadow:annotate"  # Add annotations to shadows
+    
+    # Direct Filesystem permissions (for Builder Agents ONLY)
+    FILESYSTEM_READ = "filesystem:read"   # Direct filesystem read
+    FILESYSTEM_WRITE = "filesystem:write" # Direct filesystem write
+    FILESYSTEM_EXECUTE = "filesystem:execute" # Execute filesystem commands
+    
+    # Command execution permissions
+    COMMAND_EXECUTION = "command:execute"
+    COMMAND_VALIDATION = "command:validate"
+    
+    # System-level permissions
+    SYSTEM_ADMIN = "system:admin"
+    SYSTEM_CONFIG = "system:config"
+    
+    # Specialized agent permissions
+    BRIDGE_ACCESS = "bridge:access"
+    CONTEXT_SHARING = "context:share"
+    SESSION_MANAGEMENT = "session:manage"
+    
+    # Security and audit permissions
+    AUDIT_ACCESS = "audit:access"
+    SECURITY_REVIEW = "security:review"
 
 
 class AgentRole(str, Enum):
@@ -112,31 +143,77 @@ class SimpleAuthenticator:
             AgentRole.GUEST: {
                 Permission.READ_EVENTS,
                 Permission.HEALTH_CHECK,
+                Permission.SHADOW_READ,  # Guests can only read shadow files via FUSE
             },
-            AgentRole.AGENT: {
+            AgentRole.AGENT: {  # Builder agents with direct filesystem access
                 Permission.READ_EVENTS,
                 Permission.WRITE_EVENTS,
                 Permission.QUERY_EVENTS,
                 Permission.HEALTH_CHECK,
+                Permission.FILESYSTEM_READ,   # Direct filesystem access
+                Permission.FILESYSTEM_WRITE,  # Direct filesystem access
+                Permission.FILESYSTEM_EXECUTE, # Can execute commands
+                Permission.COMMAND_EXECUTION,
+                Permission.COMMAND_VALIDATION,
+                Permission.CONTEXT_SHARING,
             },
-            AgentRole.EXPERT_AGENT: {
+            AgentRole.EXPERT_AGENT: {  # Expert agents with shadow-only access
                 Permission.READ_EVENTS,
                 Permission.WRITE_EVENTS, 
                 Permission.QUERY_EVENTS,
                 Permission.HEALTH_CHECK,
+                Permission.SHADOW_READ,      # Shadow filesystem only
+                Permission.SHADOW_WRITE,     # Shadow filesystem only
+                Permission.SHADOW_ANNOTATE,  # Can annotate shadows
+                Permission.COMMAND_VALIDATION,  # Can validate but not execute
+                Permission.EXPERT_COORDINATION,
+                Permission.CONTEXT_SHARING,
+                Permission.SESSION_MANAGEMENT,
+                Permission.BRIDGE_ACCESS,
+                Permission.SECURITY_REVIEW,
             },
-            AgentRole.SYSTEM_AGENT: {
+            AgentRole.SYSTEM_AGENT: {  # System agents need both shadow and filesystem
                 Permission.READ_EVENTS,
                 Permission.WRITE_EVENTS,
                 Permission.QUERY_EVENTS,
                 Permission.HEALTH_CHECK,
+                Permission.SHADOW_READ,       # Shadow access for coordination
+                Permission.SHADOW_WRITE,
+                Permission.SHADOW_ANNOTATE,
+                Permission.FILESYSTEM_READ,   # Direct access for system tasks
+                Permission.FILESYSTEM_WRITE,
+                Permission.FILESYSTEM_EXECUTE,
+                Permission.COMMAND_EXECUTION,
+                Permission.COMMAND_VALIDATION,
+                Permission.EXPERT_COORDINATION,
+                Permission.CONTEXT_SHARING,
+                Permission.SESSION_MANAGEMENT,
+                Permission.BRIDGE_ACCESS,
+                Permission.SYSTEM_CONFIG,
+                Permission.AUDIT_ACCESS,
                 Permission.ADMIN_ACCESS,
             },
-            AgentRole.ADMIN: {
+            AgentRole.ADMIN: {  # Admins have all permissions
                 Permission.READ_EVENTS,
                 Permission.WRITE_EVENTS,
                 Permission.QUERY_EVENTS,
                 Permission.HEALTH_CHECK,
+                Permission.SHADOW_READ,
+                Permission.SHADOW_WRITE,
+                Permission.SHADOW_ANNOTATE,
+                Permission.FILESYSTEM_READ,
+                Permission.FILESYSTEM_WRITE,
+                Permission.FILESYSTEM_EXECUTE,
+                Permission.COMMAND_EXECUTION,
+                Permission.COMMAND_VALIDATION,
+                Permission.EXPERT_COORDINATION,
+                Permission.CONTEXT_SHARING,
+                Permission.SESSION_MANAGEMENT,
+                Permission.BRIDGE_ACCESS,
+                Permission.SYSTEM_ADMIN,
+                Permission.SYSTEM_CONFIG,
+                Permission.AUDIT_ACCESS,
+                Permission.SECURITY_REVIEW,
                 Permission.ADMIN_ACCESS,
             },
         }
@@ -346,16 +423,7 @@ class Authorizer:
             AuthenticationError: If agent is not authenticated
             AuthorizationError: If agent lacks required permissions
         """
-        # Try to get validated identity, auto-authenticate if missing
-        try:
-            identity = self._get_validated_identity(agent_id)
-        except AuthenticationError:
-            # Auto-authenticate agent for convenience (development/testing)
-            print(f"🔄 Auto-authenticating agent {agent_id} during write operation")
-            token = self.authenticator.create_token(agent_id)
-            from .auth import AgentRole
-            identity = self.authenticator.authenticate(agent_id, token, AgentRole.AGENT)
-            print(f"✅ Auto-authentication successful for {agent_id}")
+        identity = self._get_validated_identity(agent_id)
         
         if not identity.has_permission(Permission.WRITE_EVENTS):
             raise AuthorizationError(f"Agent {agent_id} lacks WRITE_EVENTS permission")
@@ -414,6 +482,88 @@ class Authorizer:
         
         return identity
     
+    def authorize_expert_coordination(self, agent_id: str) -> AgentIdentity:
+        """Authorize expert coordination operations.
+        
+        Args:
+            agent_id: Agent requesting access
+            
+        Returns:
+            Validated AgentIdentity
+            
+        Raises:
+            AuthenticationError: If agent is not authenticated
+            AuthorizationError: If agent lacks required permissions
+        """
+        identity = self._get_validated_identity(agent_id)
+        
+        if not identity.has_permission(Permission.EXPERT_COORDINATION):
+            raise AuthorizationError(f"Agent {agent_id} lacks EXPERT_COORDINATION permission")
+        
+        return identity
+    
+    def authorize_file_access(self, agent_id: str, operation: str = "read", file_path: Optional[str] = None) -> AgentIdentity:
+        """Authorize file system operations through FUSE mount.
+        
+        Args:
+            agent_id: Agent requesting access
+            operation: Type of operation ("read" or "write")
+            file_path: Optional file path being accessed
+            
+        Returns:
+            Validated AgentIdentity
+            
+        Raises:
+            AuthenticationError: If agent is not authenticated
+            AuthorizationError: If agent lacks required permissions
+        """
+        identity = self._get_validated_identity(agent_id)
+        
+        required_permission = Permission.FILE_READ if operation == "read" else Permission.FILE_WRITE
+        
+        if not identity.has_permission(required_permission):
+            raise AuthorizationError(f"Agent {agent_id} lacks {required_permission} permission")
+        
+        # Additional security checks for sensitive paths
+        if file_path:
+            sensitive_paths = ['/etc', '/usr', '/var', '/boot', '/sys', '/proc', '/dev']
+            for sensitive_path in sensitive_paths:
+                if file_path.startswith(sensitive_path):
+                    if not identity.has_permission(Permission.SYSTEM_ADMIN):
+                        raise AuthorizationError(f"Access to {sensitive_path} requires SYSTEM_ADMIN permission")
+        
+        self._check_rate_limit(identity)
+        
+        return identity
+    
+    def authorize_command_execution(self, agent_id: str, command_type: Optional[str] = None) -> AgentIdentity:
+        """Authorize command execution operations.
+        
+        Args:
+            agent_id: Agent requesting access
+            command_type: Optional type of command being executed
+            
+        Returns:
+            Validated AgentIdentity
+            
+        Raises:
+            AuthenticationError: If agent is not authenticated
+            AuthorizationError: If agent lacks required permissions
+        """
+        identity = self._get_validated_identity(agent_id)
+        
+        if not identity.has_permission(Permission.COMMAND_EXECUTION):
+            raise AuthorizationError(f"Agent {agent_id} lacks COMMAND_EXECUTION permission")
+        
+        # Additional checks for system-level commands
+        if command_type and command_type in ['system_admin', 'system_config']:
+            if not identity.has_permission(Permission.SYSTEM_ADMIN):
+                raise AuthorizationError(f"Command type {command_type} requires SYSTEM_ADMIN permission")
+        
+        self._check_rate_limit(identity)
+        
+        return identity
+    
     def _get_validated_identity(self, agent_id: str) -> AgentIdentity:
         """Get and validate agent identity.
         
@@ -428,16 +578,7 @@ class Authorizer:
         """
         identity = self.authenticator.get_authenticated_agent(agent_id)
         if not identity:
-            # CRITICAL FIX: Auto-authenticate missing agents
-            print(f"🔧 Auto-authenticating missing agent: {agent_id}")
-            try:
-                token = self.authenticator.create_token(agent_id)
-                from .auth import AgentRole
-                identity = self.authenticator.authenticate(agent_id, token, AgentRole.AGENT)
-                print(f"✅ Auto-authenticated agent: {agent_id}")
-            except Exception as e:
-                print(f"❌ Auto-authentication failed for {agent_id}: {e}")
-                raise AuthenticationError(f"Agent {agent_id} is not authenticated")
+            raise AuthenticationError(f"Agent {agent_id} is not authenticated")
         
         if identity.is_expired():
             raise AuthenticationError(f"Agent {agent_id} authentication has expired")

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 import time
@@ -16,6 +17,8 @@ import aiofiles
 import msgpack
 from pydantic import ValidationError
 
+logger = logging.getLogger(__name__)
+
 from .models import (
     Event, EventBatch, EventFilter, EventQuery, EventType, 
     QueryResult, SnapshotMetadata, SystemHealth
@@ -27,6 +30,7 @@ from .auth import (
     SimpleAuthenticator, Authorizer, AgentIdentity, Permission,
     AuthenticationError, AuthorizationError, create_system_authenticator
 )
+from .coordinated_authenticator import CoordinatedAuthenticator
 
 
 class EventStoreError(Exception):
@@ -39,7 +43,8 @@ class EventStore:
     
     def __init__(self, data_dir: str = "./data/events", 
                  auth_secret: Optional[str] = None,
-                 allowed_base_dirs: Optional[List[str]] = None):
+                 allowed_base_dirs: Optional[List[str]] = None,
+                 external_authenticator: Optional[CoordinatedAuthenticator] = None):
         # Security validation for data directory
         self.path_validator = PathValidator(allowed_base_dirs)
         validated_data_dir = self.path_validator.validate_directory(data_dir)
@@ -50,7 +55,15 @@ class EventStore:
         # Security components
         self.input_validator = InputValidator()
         self.resource_limiter = ResourceLimiter()
-        self.authenticator = create_system_authenticator(auth_secret)
+        
+        # Use external coordinated authenticator if provided, otherwise create system authenticator
+        if external_authenticator:
+            self.authenticator = external_authenticator._authenticator  # Access internal SimpleAuthenticator
+            logger.info(f"🔐 EventStore using CoordinatedAuthenticator: {id(external_authenticator)}")
+        else:
+            self.authenticator = create_system_authenticator(auth_secret)
+            logger.info("🔐 EventStore using standalone authenticator")
+        
         self.authorizer = Authorizer(self.authenticator)
         
         # HMAC secret for event authentication

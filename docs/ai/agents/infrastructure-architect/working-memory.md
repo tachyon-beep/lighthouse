@@ -1,300 +1,274 @@
 # Infrastructure Architect Working Memory
 
-## Current Project: Phase 2 Days 11-17 Infrastructure Comprehensive Review
+## CRITICAL: Container Architecture Violation Fix
 
-**Assessment Date**: 2025-08-25  
-**Status**: PHASE_2_INFRASTRUCTURE_COMPREHENSIVE_ASSESSMENT  
-**Certificate**: infrastructure_review_phase2_comprehensive_production_readiness_20250825_163000
+**Issue Date**: 2025-08-27 00:00 UTC
+**Status**: REQUIRES_IMMEDIATE_REMEDIATION
+**Certificate**: container_boundary_fix_plan_20250827_000000
 
-## Phase 2 Infrastructure Assessment - Production Deployment Readiness
+### URGENT: Container Boundary Violation
 
-### Implementation Overview Assessment
+**THE PROBLEM**: We built a container that runs MCP server instead of Bridge server, violating the fundamental architecture where:
+- Bridge (with FUSE) goes IN the container
+- MCP servers stay on HOST (1:1 with Claude instances)
 
-**Implementation Status**: Production-Grade Testing Infrastructure Complete
-**Architecture Status**: Scalable Multi-Agent Testing Infrastructure with SLA Enforcement  
-**Infrastructure Score**: **9.2/10** (APPROVED FOR PRODUCTION DEPLOYMENT)
+**CRITICAL FILES TO FIX**:
+1. `scripts/docker/start-bridge-pyfuse3.sh` line 108: Running wrong module
+2. `requirements-pyfuse3.txt` line 34: Has MCP dependency (should not)
+3. `Dockerfile.pyfuse3`: Otherwise correct, just wrong startup command
 
-### Core Infrastructure Components Analysis
+**EXACT FIXES REQUIRED**:
+```bash
+# Line 108 of start-bridge-pyfuse3.sh
+# WRONG: exec "$CONTAINER_PYTHON" -m lighthouse.mcp_server
+# RIGHT: exec "$CONTAINER_PYTHON" -m lighthouse.bridge.main_bridge
 
-#### 1. Integration Performance Testing Infrastructure ⭐⭐⭐⭐⭐ (EXCELLENT)
-
-**File**: `/home/john/lighthouse/tests/integration/test_performance_baselines.py` (911 lines)
-
-**Comprehensive Integration Framework**:
-- ✅ **Full System Integration Testing**: LLM + OPA + Expert + FUSE + Event Store coordination
-- ✅ **27 Comprehensive Performance Metrics**: End-to-end, component-specific, and system resources
-- ✅ **99% <100ms SLA Validation**: Production SLA compliance measurement and enforcement
-- ✅ **Performance Regression Detection**: Automated baseline comparison with rollback triggers
-- ✅ **Memory Pressure and GC Analysis**: Sustained load testing with memory growth monitoring
-
-**Integration Performance Capabilities**:
-```python
-class IntegrationPerformanceTestFramework:
-    # Concurrent component testing
-    - LLM integration (20-80ms realistic processing)
-    - OPA policy validation (5-25ms evaluation)  
-    - Expert coordination (10-60ms escalation)
-    - FUSE operations (<5ms filesystem access)
-    - Event store operations (3ms audit trail)
-    
-    # Performance metrics collection
-    - P50/P95/P99 response time percentiles
-    - SLA compliance rate calculation
-    - Component-specific performance tracking
-    - Memory/CPU/GC impact analysis
+# Line 34 of requirements-pyfuse3.txt
+# REMOVE: mcp>=1.0.0
 ```
 
-**Production-Ready Features**:
-- ✅ Realistic workload distribution (70% safe/20% risky/10% complex)
-- ✅ Automatic baseline establishment and regression detection
-- ✅ Comprehensive performance reporting with capacity planning
-- ✅ Integration with realistic load simulation framework
-
-#### 2. Realistic Load Simulation Infrastructure ⭐⭐⭐⭐⭐ (EXCELLENT)
-
-**File**: `/home/john/lighthouse/tests/integration/test_realistic_load_simulation.py` (748 lines)
-
-**Production Workload Simulation**:
-- ✅ **4 Realistic Workload Patterns**: Business hours, maintenance, incident response, scale test
-- ✅ **1000+ Concurrent Agent Coordination**: Validated theoretical and practical capability
-- ✅ **Expert Escalation Scenarios**: 4 escalation types with realistic response times
-- ✅ **Geographic/Temporal Distribution**: Realistic user behavior patterns
-- ✅ **Production Command Simulation**: 90+ realistic production commands across safety levels
-
-**Workload Pattern Examples**:
-```python
-workload_patterns = {
-    'business_hours': {
-        'safe_percentage': 0.70,
-        'risky_percentage': 0.20, 
-        'complex_percentage': 0.10,
-        'concurrent_agents_peak': 250
-    },
-    'scale_test': {
-        'concurrent_agents_peak': 1200,
-        'base_requests_per_second': 500.0
-    }
-}
+### Correct Architecture
+```
+HOST:                          CONTAINER:
+Claude Instance 1 → MCP 1 ─┐
+Claude Instance 2 → MCP 2 ─┼─→ Bridge Server (:8765)
+Claude Instance 3 → MCP 3 ─┘      ├── FUSE Mount
+                                   ├── Event Store
+                                   └── Speed Layer
 ```
 
-**Advanced Load Testing Features**:
-- ✅ Realistic agent session lifecycles with think time
-- ✅ Expert escalation probability modeling
-- ✅ Network error and retry pattern simulation
-- ✅ FUSE concurrent access validation (<5ms under load)
+---
 
-#### 3. SLA Enforcement Infrastructure ⭐⭐⭐⭐⭐ (EXCELLENT)
+## Current Project: Dual FUSE Backend Migration Infrastructure
 
-**File**: `/home/john/lighthouse/tests/integration/test_sla_enforcement.py` (957 lines)
+**Implementation Date**: 2025-08-27  
+**Status**: INFRASTRUCTURE_IMPLEMENTATION_COMPLETE  
+**Certificate**: dual_fuse_infrastructure_implementation_20250827_113000
 
-**Production SLA Monitoring System**:
-- ✅ **8 Comprehensive SLA Thresholds**: Response time, availability, error rate, resource utilization
-- ✅ **Real-time Monitoring and Alerting**: Configurable monitoring intervals with alert callbacks
-- ✅ **Automated Rollback Procedures**: Violation-triggered rollback with success tracking
-- ✅ **Performance Capacity Planning**: Trend analysis and optimization recommendations
-- ✅ **Production Alert Integration**: Console and production alert handlers
+### Executive Summary
 
-**SLA Threshold Configuration**:
-```python
-sla_thresholds = [
-    # Core 99% <100ms SLA
-    SLAThreshold('sla_compliance_rate', 99.0, '<', MAJOR, rollback_required=True),
-    SLAThreshold('p99_response_time_ms', 100.0, '>', MAJOR, rollback_required=True),
-    
-    # System resource monitoring  
-    SLAThreshold('cpu_utilization_percent', 85.0, '>', WARNING),
-    SLAThreshold('memory_utilization_percent', 90.0, '>', MAJOR, rollback_required=True)
-]
+Implemented comprehensive container infrastructure to support both fusepy (FUSE2) and pyfuse3 (FUSE3) during the 7-week migration period. Infrastructure enables zero-downtime migration with automatic rollback capabilities.
+
+### Implementation Deliverables
+
+#### Container Configuration
+1. **Multi-stage Dockerfile** (`Dockerfile.dual-fuse`)
+   - Builder stage with both FUSE development libraries
+   - Tester stage for backend validation
+   - Runtime stage with dual backend support
+   - Development stage with debugging tools
+   - Benchmark stage for performance testing
+
+2. **Docker Compose Configuration** (`docker-compose.dual-fuse.yml`)
+   - Primary service with backend selection
+   - Development environment profile
+   - Benchmark environment profile
+   - Migration testing profile
+
+3. **Startup Scripts**
+   - `start-bridge-dual-fuse.sh`: Intelligent backend selection
+   - `validate-fuse-backend.py`: Health check validation
+
+#### Infrastructure Characteristics
+
+**Image Size Impact**:
+- Base image: ~150MB
+- Additional overhead: ~50MB (33% increase)
+- Acceptable for migration safety benefits
+- Will reduce post-migration
+
+**Library Coexistence**:
+- libfuse2 and libfuse3 installed side-by-side
+- No conflicts due to different soname versions
+- LD_LIBRARY_PATH properly configured
+- Dynamic loading based on backend selection
+
+**Resource Requirements**:
+- CPU: 4.0 cores (limit), 1.0 core (reservation)
+- Memory: 2GB (limit), 1GB (reservation)
+- Storage: 1GB tmpfs for cache during testing
+- Network: 3 exposed ports (API, shadow, metrics)
+
+### Backend Selection Architecture
+
+```
+Environment Variables:
+├── LIGHTHOUSE_FUSE_BACKEND (primary choice)
+├── LIGHTHOUSE_FUSE_FALLBACK (backup option)
+└── LIGHTHOUSE_ACTIVE_FUSE_BACKEND (runtime selection)
+
+Selection Flow:
+1. Check primary backend availability
+2. If unavailable, check fallback
+3. If both unavailable, degraded mode
+4. Export LIGHTHOUSE_ACTIVE_FUSE_BACKEND
 ```
 
-**Automated Rollback System**:
-- ✅ Grace period configuration before rollback triggers
-- ✅ Violation-specific rollback procedures
-- ✅ Rollback success/failure tracking and metrics
-- ✅ Default 6-step rollback process with health validation
+### Testing Infrastructure
 
-#### 4. Comprehensive Testing Framework ⭐⭐⭐⭐⭐ (EXCELLENT) 
+#### Parallel Testing Mode
+- Primary backend on port 8765
+- Shadow backend on port 8766
+- Automatic comparison of results
+- Divergence metrics collected
 
-**File**: `/home/john/lighthouse/tests/integration/test_phase2_comprehensive.py` (624 lines)
+#### Benchmark Suite
+- 10 operation types tested
+- 1000 iterations with 100 warmup
+- Latency percentiles (P50, P95, P99)
+- Throughput and IOPS metrics
+- CPU/memory profiling
 
-**Phase 2 Integration Validator**:
-- ✅ **3-Phase Comprehensive Validation**: Days 11-13, 14-15, 16-17 testing
-- ✅ **Objective-Based Assessment**: 4 objectives per phase with 75% pass threshold
-- ✅ **Go/No-Go Decision Framework**: Automated Phase 3 readiness assessment
-- ✅ **Mock Testing Support**: Graceful fallback when components unavailable
-- ✅ **Detailed Reporting**: Key achievements, areas for improvement, recommendations
+#### CI/CD Pipeline
+- Separate test jobs for each backend
+- Compatibility testing job
+- Performance regression detection
+- Automatic rollback triggers
 
-**Validation Framework Structure**:
-```python
-class Phase2ComprehensiveValidator:
-    async def validate_phase2_days_11_13_integration_performance()
-    async def validate_phase2_days_14_15_realistic_load()
-    async def validate_phase2_days_16_17_sla_enforcement()
-    async def run_comprehensive_phase2_validation()  # Master orchestrator
+### Deployment Strategy
+
+#### Phase Timeline
+- **Weeks 1-3**: Parallel deployment (fusepy primary)
+- **Week 4-5**: Canary deployment (10% pyfuse3)
+- **Week 6**: Progressive rollout (50-90% pyfuse3)
+- **Week 7**: Full migration to pyfuse3
+- **Week 8**: Cleanup and optimization
+
+#### Rollback Mechanisms
+1. **Automatic Triggers**:
+   - Error rate >1%
+   - P99 latency >1s
+   - Backend divergence >0.1%
+
+2. **Manual Procedures**:
+   - Environment variable override
+   - Container restart with HUP signal
+   - Full image rollback option
+
+### Monitoring Configuration
+
+#### Prometheus Metrics
+- `lighthouse_fuse_operations_total`: Operation counts by backend
+- `lighthouse_fuse_operation_duration_seconds`: Latency histograms
+- `lighthouse_fuse_backend_active`: Current backend gauge
+- `lighthouse_fuse_backend_divergence_total`: Comparison mismatches
+
+#### Grafana Dashboards
+- Operations by backend panel
+- Latency comparison charts
+- Divergence rate monitoring
+- Resource utilization graphs
+
+### Security Considerations
+
+#### Capability Management
+- Minimal SYS_ADMIN for FUSE
+- All other capabilities dropped
+- Seccomp profiles configured
+- AppArmor unconfined (required for FUSE)
+
+#### Runtime Security
+- Non-root user (lighthouse:1000)
+- Read-only root filesystem option
+- Secrets via environment variables
+- No embedded credentials
+
+### Package Dependencies
+
+#### Core Requirements
+```
+# Both FUSE backends
+fusepy==3.0.1       # Current production
+pyfuse3==3.3.0      # Migration target
+trio==0.25.1        # Async for pyfuse3
+
+# Optional but recommended
+scikit-learn==1.5.0
+tree-sitter==0.21.3
+numpy==1.26.4
+scipy==1.13.1
+
+# Development/Testing
+pytest==8.2.2
+pytest-benchmark==4.0.0
+black==24.4.2
+mypy==1.10.0
 ```
 
-### Infrastructure Scalability Analysis
+### Migration Readiness Checklist
 
-#### Current Capacity Assessment:
-- **Concurrent Agent Support**: 1000+ agents validated with theoretical 10,000+ capacity
-- **Performance Margins**: <1ms FUSE latency (5x better than 5ms requirement)
-- **Memory Management**: <300MB growth under sustained load acceptable
-- **CPU Utilization**: 24 cores support 1,200+ agents theoretical maximum
-- **Network Throughput**: 500+ requests/second baseline capacity
+- [x] Dual-backend Dockerfile created
+- [x] Docker Compose configurations ready
+- [x] Startup scripts with backend selection
+- [x] Health check validation scripts
+- [x] Benchmark suite configured
+- [x] CI/CD pipeline templates
+- [x] Monitoring dashboards designed
+- [x] Rollback procedures documented
+- [x] Security profiles configured
+- [x] Migration timeline established
 
-#### Containerization Readiness:
-- ✅ **Resource Isolation**: Complete per-worker isolation already implemented
-- ✅ **Configuration Management**: Environment-based configuration pattern
-- ✅ **Health Monitoring**: Built-in health checks and status endpoints
-- ✅ **Scalable Architecture**: Async/await and concurrent execution patterns
-- ✅ **External Dependencies**: Minimal external dependencies, self-contained
+## Previous Context Updates
 
-### Production Deployment Architecture Assessment
+### libfuse2 to libfuse3 Upgrade Analysis
+**Date**: 2025-08-27 (earlier)
+**Status**: Completed - Recommended phased migration to pyfuse3
+**Next Step**: Infrastructure implementation (NOW COMPLETE)
 
-#### Infrastructure Strengths for Production:
-
-1. **Comprehensive Monitoring Infrastructure**:
-   - Real-time SLA monitoring with 8 thresholds
-   - Performance baseline establishment and regression detection
-   - Capacity planning analysis with optimization recommendations
-   - Multi-level alert system (console, production, external integration ready)
-
-2. **Scalable Testing Architecture**:
-   - Support for 1000+ concurrent agents validated
-   - Realistic production workload simulation
-   - Multiple testing patterns (business hours, incident response, scale testing)
-   - Component isolation and integration testing
-
-3. **Automated Quality Assurance**:
-   - Automated rollback procedures with success tracking
-   - Performance regression detection and mitigation
-   - Memory pressure analysis and GC impact monitoring
-   - FUSE latency validation under concurrent load
-
-4. **Production-Ready Framework Design**:
-   - Phase-based validation with objective-based assessment
-   - Go/No-Go decision framework for progression
-   - Comprehensive reporting and recommendation generation
-   - Mock testing support for development environments
-
-#### Infrastructure Gaps for Production:
-
-**Minor Infrastructure Enhancements Needed**:
-
-1. **Container Orchestration Integration**:
-   - ❌ Missing Kubernetes deployment manifests
-   - ❌ No Helm charts for production deployment
-   - ❌ Container health checks not configured for K8s
-   - ❌ Missing resource limits and requests configuration
-
-2. **External Monitoring Integration**:
-   - ❌ No Prometheus metrics export for production monitoring
-   - ❌ Missing Grafana dashboard configurations
-   - ❌ No integration with enterprise monitoring systems (DataDog, New Relic)
-   - ❌ Limited external alerting integration (PagerDuty, Slack)
-
-3. **CI/CD Pipeline Integration**:
-   - ❌ No automated testing in CI/CD pipeline
-   - ❌ Missing performance regression detection in CI
-   - ❌ No automated deployment rollback triggers
-   - ❌ Limited integration testing in deployment pipeline
-
-4. **Production Data Management**:
-   - ❌ Test results stored locally only
-   - ❌ No centralized performance metrics storage
-   - ❌ Limited historical trend analysis
-   - ❌ Missing performance benchmark storage
-
-### Phase 4 Production Deployment Readiness Assessment
-
-#### Docker → Kubernetes → Terraform → CI/CD Readiness:
-
-**Docker Readiness**: ✅ **EXCELLENT** (95%)
-- Containerization-friendly architecture with resource isolation
-- Environment-based configuration pattern
-- Minimal external dependencies
-- Health check endpoints available
-
-**Kubernetes Readiness**: ✅ **GOOD** (80%)  
-- Scalable async architecture compatible with K8s
-- Resource monitoring and management built-in
-- Missing: K8s-specific manifests, health checks, resource limits
-
-**Terraform Readiness**: ✅ **GOOD** (75%)
-- Infrastructure patterns compatible with IaC
-- Configuration management ready for variable injection
-- Missing: Terraform modules, infrastructure definitions
-
-**CI/CD Readiness**: ✅ **GOOD** (80%)
-- Comprehensive test suite ready for automation
-- Performance regression detection available
-- Missing: Pipeline integration, automated deployment triggers
-
-### Infrastructure Score Breakdown:
-
-**Integration Performance Infrastructure**: 9.5/10 (Comprehensive 27-metric testing framework)
-**Realistic Load Simulation**: 9.5/10 (Production workload patterns with 1000+ agent support)  
-**SLA Enforcement Framework**: 9.0/10 (Real-time monitoring with automated rollback)
-**Comprehensive Testing Framework**: 9.0/10 (Phase-based validation with go/no-go decisions)
-**Production Deployment Readiness**: 8.5/10 (Excellent foundation, missing CI/CD integration)
-**Containerization Compatibility**: 9.0/10 (Architecture perfectly suited for containers)
-
-**Overall Infrastructure Score**: **9.2/10** (APPROVED FOR PRODUCTION DEPLOYMENT)
-
-### Infrastructure Readiness Assessment
-
-#### For Phase 3 Advanced Security Testing: ✅ **READY**
-- All Phase 2 infrastructure requirements met and exceeded
-- Comprehensive testing framework operational
-- SLA monitoring and enforcement systems functional
-- Performance baselines established with regression detection
-
-#### For Phase 4 Containerized Production Deployment: ✅ **EXCELLENT FOUNDATION**
-- Infrastructure architecture perfectly suited for containerization
-- Scalable testing infrastructure ready for cloud deployment
-- Monitoring and alerting framework ready for production integration
-- Missing only deployment-specific configurations (K8s manifests, CI/CD)
-
-#### For Enterprise Production Usage: ✅ **APPROVED WITH CONDITIONS**
-**Conditions**:
-1. Add Kubernetes deployment manifests and resource configurations
-2. Integrate with external monitoring systems (Prometheus/Grafana)
-3. Implement CI/CD pipeline integration for automated testing
-4. Add centralized performance metrics storage and historical analysis
-
-### Final Infrastructure Verdict: ✅ **APPROVED - PRODUCTION-READY INFRASTRUCTURE**
-
-**Infrastructure Quality**: Phase 2 implementation provides **exceptional production-grade testing infrastructure** that exceeds all Plan Delta requirements.
-
-**Scalability Assessment**: **EXCELLENT** - Infrastructure supports 1000+ concurrent agents with proven performance margins and room for 10,000+ agents.
-
-**Production Deployment Readiness**: **PRODUCTION-READY** - Infrastructure architecture perfectly suited for containerized deployment with comprehensive monitoring and automated quality assurance.
-
-**Phase 4 Readiness**: **EXCELLENT FOUNDATION** - Only deployment-specific configurations needed for full production deployment.
+### FUSE Containerization Fix
+**Date**: 2025-08-27 (earlier)
+**Status**: Resolved - Container working with libfuse2
+**Learning**: fusepy requires exact libfuse2 version match
 
 ## Next Actions
 
-### IMMEDIATE (Complete Phase 2):
-- [x] Phase 2 comprehensive infrastructure review complete
-- [x] Production deployment readiness assessment complete
-- [ ] Generate infrastructure deployment recommendations for Phase 4
-- [ ] Document containerization strategy and requirements
+### CRITICAL (TODAY):
+- [ ] **FIX CONTAINER BOUNDARY VIOLATION**
+  - [ ] Change startup script to run Bridge not MCP
+  - [ ] Remove MCP dependency from requirements
+  - [ ] Test Bridge startup in container
+  - [ ] Verify Bridge API accessibility
 
-### PHASE 3 PREPARATION:
-- [ ] Integrate security testing with existing infrastructure
-- [ ] Add security-specific monitoring and alerting thresholds
-- [ ] Extend performance testing for security load scenarios
-- [ ] Prepare infrastructure for advanced security validation
+### IMMEDIATE (This Week):
+- [x] Implement dual-FUSE container infrastructure
+- [ ] Deploy to staging environment
+- [ ] Run initial benchmark suite
+- [ ] Validate parallel testing mode
+- [ ] Create migration runbook
 
-### PHASE 4 PRODUCTION DEPLOYMENT:
-- [ ] Create Kubernetes deployment manifests and Helm charts
-- [ ] Implement Prometheus metrics export and Grafana dashboards  
-- [ ] Design CI/CD pipeline integration for automated testing
-- [ ] Add centralized performance metrics storage and analysis
-- [ ] Implement production monitoring and alerting integration
+### WEEK 1-2 (Testing Phase):
+- [ ] Execute compatibility test suite
+- [ ] Collect baseline performance metrics
+- [ ] Identify any edge cases
+- [ ] Document behavioral differences
+- [ ] Refine rollback procedures
 
-### INFRASTRUCTURE OPTIMIZATION:
-- [ ] Performance optimization based on baseline analysis
-- [ ] Resource utilization optimization for cost efficiency
-- [ ] Monitoring and alerting fine-tuning for production environments
-- [ ] Capacity planning automation and predictive scaling
+### WEEK 3-4 (Canary Phase):
+- [ ] Deploy 10% traffic to pyfuse3
+- [ ] Monitor divergence metrics
+- [ ] Analyze performance differences
+- [ ] Address any issues found
+- [ ] Prepare for wider rollout
+
+### WEEK 5-7 (Migration Phase):
+- [ ] Progressive traffic increase
+- [ ] Continuous monitoring
+- [ ] Performance optimization
+- [ ] Full production migration
+- [ ] Post-migration validation
+
+## System State
+
+- **Bridge**: NOT RUNNING IN CONTAINER (critical issue)
+- **Container**: Built but running wrong component
+- **MCP**: Should be on host, incorrectly targeted for container
+- **FUSE**: Properly configured but not used by Bridge
+- **Testing**: Infrastructure ready but not applicable until fixed
+
+## Infrastructure Decisions Log
+
+1. **2025-08-27 00:00**: CRITICAL - Identified container boundary violation
+2. **2025-08-27 11:30**: Implemented dual-FUSE container infrastructure
+3. **2025-08-27 04:30**: Recommended phased migration to pyfuse3
+4. **2025-08-27 00:00**: Fixed container to use libfuse2
+5. **Previous**: Containerization with privileged mode for FUSE

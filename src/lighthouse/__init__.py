@@ -2,34 +2,31 @@
 
 __version__ = "1.0.0"
 
-# Export main event store functionality
-from .event_store.store import EventStore, EventStoreError
-from .event_store.models import (
-    Event, EventType, EventBatch, EventFilter, EventQuery, 
-    QueryResult, SystemHealth, SnapshotMetadata
-)
-from .event_store.id_generator import EventID, generate_event_id, set_node_id
-from .event_store.auth import AgentRole, Permission, AgentIdentity
-from .event_store.validation import SecurityError
+# Note: Bridge components are in the container, not on host
+# MCP server on host doesn't need these imports
+# They cause circular dependencies and require FUSE libraries
 
-# Import the new HLD Bridge architecture directly
-from .bridge.main_bridge import LighthouseBridge
+# Export main event store functionality (if needed)
+# Commented out to prevent circular imports when loading MCP server
+# from .event_store.store import EventStore, EventStoreError
+# from .event_store.models import (
+#     Event, EventType, EventBatch, EventFilter, EventQuery, 
+#     QueryResult, SystemHealth, SnapshotMetadata
+# )
+# from .event_store.id_generator import EventID, generate_event_id, set_node_id
+# from .event_store.auth import AgentRole, Permission, AgentIdentity
+# from .event_store.validation import SecurityError
+
+# Bridge runs in container, not imported on host
+# from .bridge.main_bridge import LighthouseBridge
 
 # Legacy compatibility - point to new architecture
 def get_lighthouse_bridge(project_id: str, config: dict = None):
-    """Get the main Lighthouse Bridge instance"""
-    return LighthouseBridge(project_id, config or {})
+    """Get the main Lighthouse Bridge instance - runs in container"""
+    raise NotImplementedError("Bridge runs in container, access via HTTP API at localhost:8765")
 
 __all__ = [
-    # Core event store
-    "EventStore", "EventStoreError", 
-    # Event models
-    "Event", "EventType", "EventBatch", "EventFilter", "EventQuery",
-    "QueryResult", "SystemHealth", "SnapshotMetadata",
-    # Event IDs
-    "EventID", "generate_event_id", "set_node_id", 
-    # Security
-    "AgentRole", "Permission", "AgentIdentity", "SecurityError",
-    # Main Bridge architecture
-    "LighthouseBridge", "get_lighthouse_bridge"
+    # Minimal exports to prevent circular imports
+    "get_lighthouse_bridge",
+    "__version__"
 ]

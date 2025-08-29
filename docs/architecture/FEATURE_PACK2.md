@@ -1,5 +1,3 @@
-You've identified a critical gap! The current system has validation (blocking dangerous commands) and pair programming (collaborative work), but NOT formal review processes where multiple agents explicitly review and sign off. This is a huge missing piece for enterprise development. Let me draft this as Annex B:
-
 # Lighthouse: High-Level Design - Annex B
 
 ## Feature Pack 2: Multi-Agent Review & Sign-off System (MARS)

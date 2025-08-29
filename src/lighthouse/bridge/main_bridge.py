@@ -144,6 +144,10 @@ class LighthouseBridge:
         try:
             logger.info(f"Starting Lighthouse Bridge for project {self.project_id}")
             
+            # Initialize event store first - it needs to open its log files
+            logger.info("Initializing event store")
+            await self.event_store.initialize()
+            
             # Start core components in order
             await self._start_event_stream()
             await self._start_speed_layer()
