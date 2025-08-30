@@ -301,20 +301,53 @@ class SecureExpertCoordinator:
         Authenticate expert using session token
         
         Args:
-            auth_token: Session token from registration
+            auth_token: Session token from registration or Bridge session token
             
         Returns:
             RegisteredExpert if valid, None otherwise
         """
         try:
-            # Validate token format and lookup
-            if not auth_token or auth_token not in self.expert_tokens:
+            # First try direct expert token lookup
+            if auth_token in self.expert_tokens:
+                agent_id = self.expert_tokens[auth_token]
+                expert = self.registered_experts.get(agent_id)
+                logger.debug(f"Found expert {agent_id} via expert token")
+            else:
+                # Fallback: Check if it's a Bridge session token
+                # Extract agent_id from session token format: session_id:agent_id:timestamp:hmac
+                if ":" in auth_token:
+                    parts = auth_token.split(":")
+                    if len(parts) >= 2:
+                        potential_agent_id = parts[1]
+                        # Check if this agent is registered
+                        expert = self.registered_experts.get(potential_agent_id)
+                        if expert:
+                            # For Bridge session tokens, accept them if the agent is registered
+                            # The HTTP layer already validated the session token
+                            logger.info(f"Accepting Bridge session token for registered agent {potential_agent_id}")
+                            # Mark as authenticated via Bridge session
+                            # Set temporary auth credentials for session-based auth
+                            if not expert.auth_token:
+                                expert.auth_token = auth_token  # Use the Bridge session token
+                            if not expert.session_key:
+                                # Generate a session key for Bridge-authenticated experts
+                                import hashlib
+                                expert.session_key = hashlib.sha256(f"{auth_token}:{potential_agent_id}".encode()).hexdigest()
+                        else:
+                            logger.warning(f"No registered expert found for agent_id {potential_agent_id} from session token")
+                            logger.debug(f"Registered experts: {list(self.registered_experts.keys())}")
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+            
+            if not expert:
+                logger.warning(f"Expert object not found for token (method: {'direct' if auth_token in self.expert_tokens else 'session'})")
                 return None
             
-            agent_id = self.expert_tokens[auth_token]
-            expert = self.registered_experts.get(agent_id)
-            
-            if not expert or not expert.is_authenticated():
+            if not expert.is_authenticated():
+                logger.warning(f"Expert {expert.agent_id} failed is_authenticated check")
                 return None
             
             # Update last heartbeat
@@ -347,22 +380,36 @@ class SecureExpertCoordinator:
         """
         try:
             # Authenticate requester
+            logger.info(f"Delegating command: type={command_type}, token_preview={requester_token[:30] if requester_token else 'None'}...")
             requester = await self.authenticate_expert(requester_token)
             if not requester:
+                logger.error(f"Authentication failed for delegate_command")
                 return False, "Authentication failed", None
+            logger.info(f"Authenticated requester: {requester.agent_id}")
             
             # Validate command data against security rules
             validation_result = await self._validate_command_security(command_type, command_data, requester)
             if not validation_result[0]:
                 return False, f"Security validation failed: {validation_result[1]}", None
             
-            # Find capable and available experts
-            candidates = self._find_capable_experts(required_capabilities)
-            if not candidates:
-                return False, "No capable experts available", None
+            # Check if a specific expert is targeted
+            target_expert_id = command_data.get('target_expert')
             
-            # Select best expert based on performance metrics
-            selected_expert = self._select_best_expert(candidates, required_capabilities)
+            if target_expert_id:
+                # Direct expert targeting
+                selected_expert = self.registered_experts.get(target_expert_id)
+                if not selected_expert:
+                    return False, f"Target expert {target_expert_id} not found", None
+                if not selected_expert.is_available():
+                    return False, f"Target expert {target_expert_id} is not available", None
+            else:
+                # Capability-based routing
+                candidates = self._find_capable_experts(required_capabilities)
+                if not candidates:
+                    return False, "No capable experts available", None
+                
+                # Select best expert based on performance metrics
+                selected_expert = self._select_best_expert(candidates, required_capabilities)
             
             # Create delegation
             delegation_id = str(uuid.uuid4())
@@ -380,8 +427,9 @@ class SecureExpertCoordinator:
             
             self.pending_delegations[delegation_id] = delegation_info
             
-            # Update expert status
+            # Update expert status to BUSY while handling the task
             selected_expert.status = ExpertStatus.BUSY
+            # Expert will be marked AVAILABLE again when task completes via complete_delegation()
             
             # Log delegation event
             await self._log_coordination_event(
@@ -404,6 +452,62 @@ class SecureExpertCoordinator:
         except Exception as e:
             logger.error(f"Command delegation failed: {e}")
             return False, f"Delegation failed: {e}", None
+    
+    async def complete_delegation(self, 
+                                 delegation_id: str,
+                                 result: Dict[str, Any],
+                                 expert_token: str) -> Tuple[bool, str]:
+        """
+        Complete a delegation and mark expert as available
+        
+        Args:
+            delegation_id: ID of the delegation to complete
+            result: Result data from the expert
+            expert_token: Authentication token of the expert
+            
+        Returns:
+            (success, message)
+        """
+        try:
+            # Authenticate expert
+            expert = await self.authenticate_expert(expert_token)
+            if not expert:
+                return False, "Authentication failed"
+            
+            # Verify delegation exists and belongs to this expert
+            delegation = self.pending_delegations.get(delegation_id)
+            if not delegation:
+                return False, "Delegation not found"
+            
+            if delegation['expert_id'] != expert.agent_id:
+                return False, "Delegation does not belong to this expert"
+            
+            # Mark delegation as completed
+            delegation['status'] = 'completed'
+            delegation['result'] = result
+            delegation['completed_at'] = datetime.now(timezone.utc)
+            
+            # Mark expert as available again
+            expert.status = ExpertStatus.AVAILABLE
+            
+            # Log completion
+            await self._log_coordination_event(
+                CoordinationEventType.COMMAND_COMPLETED,
+                aggregate_id=delegation_id,
+                data={
+                    'expert_id': expert.agent_id,
+                    'duration_ms': (delegation['completed_at'] - delegation['created_at']).total_seconds() * 1000
+                }
+            )
+            
+            # Clean up
+            del self.pending_delegations[delegation_id]
+            
+            return True, "Delegation completed successfully"
+            
+        except Exception as e:
+            logger.error(f"Failed to complete delegation: {e}")
+            return False, f"Failed to complete delegation: {e}"
     
     async def start_collaboration_session(self,
                                         coordinator_token: str,

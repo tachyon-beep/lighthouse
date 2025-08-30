@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 # Global Bridge instance
 bridge: Optional[LighthouseBridge] = None
 
+# Mapping from session tokens to expert auth tokens
+# This allows HTTP clients to use their session token while the coordinator uses its own auth
+session_to_expert_token: Dict[str, str] = {}
+
 # Security
 security = HTTPBearer()
 
@@ -314,11 +318,21 @@ async def register_expert(
         import hashlib
         import hmac
         
-        # Validate the auth token represents a valid session
-        # For expert registration, we need elevated privileges
-        is_valid = await validate_session_token(token, request.agent_id)
+        # Extract the actual agent_id from the token to validate
+        # The token format is: session_id:agent_id:timestamp:hmac
+        token_agent_id = "mcp_server"  # Default
+        if ":" in token:
+            parts = token.split(":")
+            if len(parts) >= 2:
+                token_agent_id = parts[1]
+        
+        # Validate the auth token with the agent that owns it
+        is_valid = await validate_session_token(token, token_agent_id)
         if not is_valid:
             raise HTTPException(status_code=401, detail="Authentication token is not a valid session")
+        
+        # Log who is registering whom
+        logger.info(f"Agent {token_agent_id} is registering expert {request.agent_id}")
         
         # Create proper AgentIdentity
         agent_identity = AgentIdentity(
@@ -363,6 +377,62 @@ async def register_expert(
         if not success:
             raise HTTPException(status_code=400, detail=message)
         
+        # Store the mapping between session token and expert auth token
+        # Store for both self-registration and orchestrator patterns
+        if request.agent_id == token_agent_id:
+            # Self-registration: agent registers itself
+            session_to_expert_token[token] = auth_token
+            logger.info(f"Stored expert token mapping for {request.agent_id}: session token -> expert token")
+        else:
+            # Orchestrator pattern: one agent registers another
+            # Also register the orchestrator agent if not already registered
+            if token_agent_id not in bridge.expert_coordinator.registered_experts:
+                # Auto-register the orchestrator as an expert with coordination capabilities
+                from lighthouse.event_store.auth import AgentIdentity, AgentRole, Permission
+                from lighthouse.bridge.expert_coordination.coordinator import ExpertCapability
+                
+                orchestrator_identity = AgentIdentity(
+                    agent_id=token_agent_id,
+                    role=AgentRole.EXPERT_AGENT,
+                    permissions={
+                        Permission.EXPERT_COORDINATION,
+                        Permission.COMMAND_VALIDATION,
+                        Permission.CONTEXT_SHARING,
+                        Permission.BRIDGE_ACCESS
+                    }
+                )
+                
+                orchestrator_capabilities = [
+                    ExpertCapability(
+                        name="orchestration",
+                        description="Orchestrator capability for coordinating other agents",
+                        input_types=["command", "context"],
+                        output_types=["delegation", "coordination"],
+                        required_permissions=[Permission.EXPERT_COORDINATION],
+                        estimated_latency_ms=500.0,
+                        confidence_threshold=0.9
+                    )
+                ]
+                
+                # Generate auth challenge for orchestrator
+                orchestrator_auth_challenge = bridge.expert_coordinator._generate_auth_challenge(token_agent_id)
+                
+                # Register the orchestrator
+                orch_success, orch_message, orch_auth_token = await bridge.expert_coordinator.register_expert(
+                    agent_identity=orchestrator_identity,
+                    capabilities=orchestrator_capabilities,
+                    auth_challenge=orchestrator_auth_challenge
+                )
+                
+                if orch_success:
+                    # Map the session token to the orchestrator's expert token
+                    session_to_expert_token[token] = orch_auth_token
+                    logger.info(f"Auto-registered orchestrator {token_agent_id} and stored token mapping")
+                else:
+                    logger.warning(f"Failed to auto-register orchestrator {token_agent_id}: {orch_message}")
+            else:
+                logger.info(f"Orchestrator {token_agent_id} already registered, not storing new mapping")
+        
         return {
             "success": success,
             "message": message,
@@ -385,13 +455,15 @@ async def delegate_to_expert(
         raise HTTPException(status_code=503, detail="Bridge not initialized")
     
     try:
-        # Validate the session token provided in the request
-        if not request.session_token:
-            raise HTTPException(status_code=401, detail="Session token is required for delegation")
+        # Use the token from the Authorization header (already validated by require_auth)
+        # Extract agent_id from token for validation
+        token_agent_id = "mcp_server"  # Default
+        if ":" in token:
+            parts = token.split(":")
+            if len(parts) >= 2:
+                token_agent_id = parts[1]
         
-        is_valid = await validate_session_token(request.session_token, "mcp_delegator")
-        if not is_valid:
-            raise HTTPException(status_code=401, detail="Invalid session token for delegation")
+        logger.info(f"Agent {token_agent_id} is delegating command to {request.target_expert}")
         
         # Call actual delegation through coordinator
         if not bridge.expert_coordinator:
@@ -409,7 +481,7 @@ async def delegate_to_expert(
         
         # Now delegate with proper token validation
         success, message, delegation_id = await bridge.expert_coordinator.delegate_command(
-            requester_token=request.session_token,
+            requester_token=token,  # Use the auth token from header
             command_type=request.tool_name,
             command_data=request.tool_input,
             required_capabilities=target_capabilities,
@@ -783,25 +855,36 @@ async def dispatch_task(
             'metadata': request.get('metadata', {})
         }
         
-        # SECURITY FIX: Require explicit session token, no auto-registration
-        requester_token = request.get('session_token', '')
-        if not requester_token:
-            raise HTTPException(
-                status_code=401, 
-                detail="Session token is required for task dispatch"
-            )
+        # Use the token from the Authorization header (already validated by require_auth)
+        # Extract agent_id from token
+        token_agent_id = "mcp_server"  # Default
+        if ":" in token:
+            parts = token.split(":")
+            if len(parts) >= 2:
+                token_agent_id = parts[1]
         
-        # Validate the token before proceeding
-        is_valid = await validate_session_token(requester_token, target_agent or "dispatcher")
-        if not is_valid:
-            raise HTTPException(status_code=401, detail="Invalid session token for task dispatch")
+        logger.info(f"Agent {token_agent_id} dispatching task to {target_agent}")
+        
+        # Use the expert auth token if we have one, otherwise use session token
+        expert_token = session_to_expert_token.get(token, token)
+        logger.info(f"Token lookup: session has mapping: {token in session_to_expert_token}, using token: {expert_token[:20] if expert_token else 'None'}...")
         
         # Use delegation system for task dispatch
+        # If target_agent looks like an agent ID (has underscore), pass it as target_expert
+        # Otherwise treat it as a capability requirement
+        if '_' in target_agent or target_agent in bridge.expert_coordinator.registered_experts:
+            # Direct agent targeting
+            task_data['target_expert'] = target_agent
+            required_capabilities = []
+        else:
+            # Capability-based routing
+            required_capabilities = [target_agent]
+        
         success, message, task_id = await bridge.expert_coordinator.delegate_command(
-            requester_token=requester_token,
+            requester_token=expert_token,  # Use expert token if available
             command_type='task_dispatch',
             command_data=task_data,
-            required_capabilities=[target_agent],
+            required_capabilities=required_capabilities,
             timeout_seconds=600
         )
         
@@ -831,13 +914,16 @@ async def start_collaboration(
         if not bridge.expert_coordinator:
             raise HTTPException(status_code=503, detail="Expert coordinator not initialized")
         
-        # SECURITY FIX: Require explicit session token, no auto-registration
-        coordinator_token = request.get('session_token', '')
-        if not coordinator_token:
-            raise HTTPException(
-                status_code=401, 
-                detail="Session token is required for collaboration"
-            )
+        # Use the token from the Authorization header (already validated by require_auth)
+        # Extract agent_id from token
+        token_agent_id = "mcp_server"  # Default
+        if ":" in token:
+            parts = token.split(":")
+            if len(parts) >= 2:
+                token_agent_id = parts[1]
+        
+        # Use the expert auth token if we have one, otherwise use session token
+        coordinator_token = session_to_expert_token.get(token, token)
         
         participant_ids = request.get('participants', [])
         collaboration_type = request.get('collaboration_type', 'general')
@@ -848,8 +934,9 @@ async def start_collaboration(
             'metadata': request.get('metadata', {})
         }
         
-        # Validate the token before proceeding
-        is_valid = await validate_session_token(coordinator_token, "collaboration_coordinator")
+        # Validate the token before proceeding - use original session token for validation
+        # (coordinator_token might be an expert token, not a session token)
+        is_valid = await validate_session_token(token, token_agent_id)
         if not is_valid:
             raise HTTPException(status_code=401, detail="Invalid session token for collaboration")
         

@@ -17,7 +17,13 @@ Core Components:
 from .main_bridge import LighthouseBridge
 from .speed_layer.dispatcher import SpeedLayerDispatcher
 from .event_store.project_aggregate import ProjectAggregate
-from .fuse_mount.filesystem import LighthouseFUSE
+
+# Optional FUSE support
+try:
+    from .fuse_mount.filesystem import LighthouseFUSE
+except (ImportError, OSError):
+    LighthouseFUSE = None
+
 from .ast_anchoring.anchor_manager import ASTAnchorManager
 from .expert_coordination.interface import ExpertAgentInterface
 from .pair_programming.session_manager import PairProgrammingSessionManager
@@ -54,10 +60,13 @@ __all__ = [
     'get_validation_bridge',   # Legacy compatibility
     'SpeedLayerDispatcher', 
     'ProjectAggregate',
-    'LighthouseFUSE',
     'ASTAnchorManager',
     'ExpertAgentInterface',
     'PairProgrammingSessionManager'
 ]
+
+# Add LighthouseFUSE only if available
+if LighthouseFUSE is not None:
+    __all__.append('LighthouseFUSE')
 
 __version__ = "2.0.0"

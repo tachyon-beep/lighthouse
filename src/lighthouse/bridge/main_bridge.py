@@ -20,7 +20,18 @@ from pathlib import Path
 
 from .speed_layer import SpeedLayerDispatcher
 from .event_store import ProjectAggregate, EventStream, TimeTravelDebugger
-from .fuse_mount import LighthouseFUSE, FUSEMountManager
+
+# Optional FUSE support - only import if available
+try:
+    from .fuse_mount import LighthouseFUSE, FUSEMountManager
+    FUSE_AVAILABLE = True
+except (ImportError, OSError) as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"FUSE support not available: {e}")
+    LighthouseFUSE = None
+    FUSEMountManager = None
+    FUSE_AVAILABLE = False
+
 from .ast_anchoring import ASTAnchorManager, TreeSitterParser
 from .expert_coordination import ExpertAgentInterface, ExpertCoordinator
 from .security.session_security import SessionSecurityValidator
@@ -74,25 +85,34 @@ class LighthouseBridge:
             expert_timeout=self.config.get('expert_timeout', 30.0)
         )
         
-        # FUSE filesystem
-        self.lighthouse_fuse = LighthouseFUSE(
-            project_aggregate=self.project_aggregate,
-            time_travel_debugger=self.time_travel_debugger,
-            event_stream=self.event_stream,
-            ast_anchor_manager=self.ast_anchor_manager,
-            auth_secret=self.config.get('auth_secret', 'test_secret_key'),
-            mount_point=mount_point
-        )
+        # FUSE filesystem (only if available)
+        if FUSE_AVAILABLE and LighthouseFUSE:
+            self.lighthouse_fuse = LighthouseFUSE(
+                project_aggregate=self.project_aggregate,
+                time_travel_debugger=self.time_travel_debugger,
+                event_stream=self.event_stream,
+                ast_anchor_manager=self.ast_anchor_manager,
+                auth_secret=self.config.get('auth_secret', 'test_secret_key'),
+                mount_point=mount_point
+            )
+        else:
+            self.lighthouse_fuse = None
+            logger.info("FUSE filesystem disabled - libfuse not available")
         
-        self.fuse_mount_manager = FUSEMountManager(
-            event_store=self.event_store,
-            project_aggregate=self.project_aggregate,
-            ast_anchor_manager=self.ast_anchor_manager,
-            event_stream_manager=self.event_stream,
-            mount_point=mount_point,
-            foreground=self.config.get('fuse_foreground', False),
-            allow_other=self.config.get('fuse_allow_other', True)
-        )
+        # Only create FUSE mount manager if available
+        if FUSE_AVAILABLE:
+            self.fuse_mount_manager = FUSEMountManager(
+                event_store=self.event_store,
+                project_aggregate=self.project_aggregate,
+                ast_anchor_manager=self.ast_anchor_manager,
+                event_stream_manager=self.event_stream,
+                mount_point=mount_point,
+                foreground=self.config.get('fuse_foreground', False),
+                allow_other=self.config.get('fuse_allow_other', True)
+            )
+        else:
+            self.fuse_mount_manager = None
+            logger.info("FUSE mount manager disabled - libfuse not available")
         
         # Expert coordination
         self.expert_coordinator = ExpertCoordinator(self.event_store)
@@ -230,9 +250,10 @@ class LighthouseBridge:
         """Start FUSE filesystem"""
         logger.info("Starting FUSE filesystem")
         
-        success = await self.fuse_mount_manager.mount()
-        if not success:
-            raise RuntimeError("Failed to mount FUSE filesystem")
+        if self.fuse_mount_manager:
+            success = await self.fuse_mount_manager.mount()
+            if not success:
+                raise RuntimeError("Failed to mount FUSE filesystem")
     
     async def _start_expert_coordination(self):
         """Start expert coordination system"""
@@ -261,7 +282,8 @@ class LighthouseBridge:
     
     async def _stop_fuse_filesystem(self):
         """Stop FUSE filesystem"""
-        await self.fuse_mount_manager.unmount()
+        if self.fuse_mount_manager:
+            await self.fuse_mount_manager.unmount()
     
     async def _stop_expert_coordination(self):
         """Stop expert coordination system"""
@@ -330,7 +352,7 @@ class LighthouseBridge:
             # Check component health
             components_status = {
                 'speed_layer': self.speed_layer_dispatcher.get_performance_metrics(),
-                'fuse_mount': self.fuse_mount_manager.get_status(),
+                'fuse_mount': self.fuse_mount_manager.get_status() if self.fuse_mount_manager else {'status': 'disabled'},
                 'event_stream': self.event_stream.get_stream_stats(),
                 'ast_anchors': self.ast_anchor_manager.get_statistics()
             }
@@ -464,7 +486,7 @@ class LighthouseBridge:
             # Component status  
             'components': {
                 'speed_layer': self.speed_layer_dispatcher.get_performance_stats(),
-                'fuse_mount': self.fuse_mount_manager.get_status(),
+                'fuse_mount': self.fuse_mount_manager.get_status() if self.fuse_mount_manager else {'status': 'disabled'},
                 'event_stream': self.event_stream.get_stream_stats(),
                 'ast_anchors': self.ast_anchor_manager.get_statistics(),
                 'project_state': self.project_aggregate.get_aggregate_stats()
