@@ -1,0 +1,18 @@
+{
+  "date": "2025-08-31",
+  "scenarios_tested": 5,
+  "resilience_score": 0.2,
+  "recovery_times": {
+    "chaos_network_partition": 15,
+    "chaos_bridge_crash": 30,
+    "chaos_event_store_corruption": 0,
+    "chaos_memory_exhaustion": 20,
+    "chaos_cpu_throttling": 0
+  },
+  "recommendations": [
+    "Improve handling of bridge_crash",
+    "Improve handling of event_store_corruption",
+    "Improve handling of memory_exhaustion",
+    "Improve handling of cpu_throttling"
+  ]
+}

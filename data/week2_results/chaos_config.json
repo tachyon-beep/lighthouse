@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "scenarios": [
+    "network",
+    "resource",
+    "state"
+  ],
+  "probability": 0.1,
+  "excluded_components": [
+    "event_store"
+  ],
+  "recovery_timeout": 60,
+  "alert_on_failure": true
+}

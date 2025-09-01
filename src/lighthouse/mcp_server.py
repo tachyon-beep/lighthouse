@@ -513,6 +513,162 @@ async def lighthouse_wait_for_messages(
     except Exception as e:
         return json.dumps({"error": str(e)})
 
+# ==================== ELICITATION TOOLS (FEATURE_PACK_0) ====================
+
+@mcp.tool()
+async def lighthouse_elicit_information(
+    to_agent: str,
+    message: str,
+    schema: Dict[str, Any],
+    timeout_seconds: int = 30,
+    metadata: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Elicit structured information from another agent.
+    
+    This replaces wait_for_messages with immediate, structured communication.
+    The target agent will receive the elicitation request and can respond with
+    data matching the provided schema.
+    
+    Args:
+        to_agent: Target agent to elicit information from
+        message: Human-readable message explaining what's needed
+        schema: JSON schema describing expected response structure
+        timeout_seconds: How long to wait for response (default 30s)
+        metadata: Optional metadata for the request
+    
+    Returns:
+        Elicitation ID that can be used to check for responses
+    """
+    session = await ensure_session()
+    if not session:
+        return json.dumps({"error": "Could not establish session with Bridge"})
+    
+    try:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as client:
+            async with client.post(
+                f"{BRIDGE_URL}/elicitation/create",
+                json={
+                    "from_agent": session.get("agent_id", "mcp_server"),
+                    "to_agent": to_agent,
+                    "message": message,
+                    "schema": schema,
+                    "timeout_seconds": timeout_seconds,
+                    "metadata": metadata or {}
+                },
+                headers={"Authorization": f"Bearer {session.get('session_token')}"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return json.dumps(data, indent=2)
+                elif resp.status == 403:
+                    # Session expired or invalid
+                    global current_session
+                    current_session = None
+                    logger.warning("Session invalidated due to 403 response in elicit_information")
+                    return json.dumps({"error": "Session expired, please retry"})
+                else:
+                    error_data = await resp.text()
+                    return json.dumps({"error": f"Bridge returned status {resp.status}: {error_data}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+@mcp.tool()
+async def lighthouse_check_elicitations(
+    agent_id: Optional[str] = None
+) -> str:
+    """
+    Check for pending elicitation requests for this agent.
+    
+    Returns a list of pending elicitation requests that need responses.
+    Each request includes the message, schema, and metadata from the requesting agent.
+    
+    Args:
+        agent_id: Agent ID to check (defaults to current session agent)
+    
+    Returns:
+        List of pending elicitation requests
+    """
+    session = await ensure_session()
+    if not session:
+        return json.dumps({"error": "Could not establish session with Bridge"})
+    
+    # Use provided agent_id or session agent_id
+    target_agent = agent_id or session.get("agent_id", "mcp_server")
+    
+    try:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as client:
+            async with client.get(
+                f"{BRIDGE_URL}/elicitation/pending",
+                params={"agent_id": target_agent},
+                headers={"Authorization": f"Bearer {session.get('session_token')}"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return json.dumps(data, indent=2)
+                elif resp.status == 403:
+                    # Session expired or invalid
+                    global current_session
+                    current_session = None
+                    logger.warning("Session invalidated due to 403 response in check_elicitations")
+                    return json.dumps({"error": "Session expired, please retry"})
+                else:
+                    error_data = await resp.text()
+                    return json.dumps({"error": f"Bridge returned status {resp.status}: {error_data}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+@mcp.tool()
+async def lighthouse_respond_to_elicitation(
+    elicitation_id: str,
+    response_type: str,
+    data: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Respond to an elicitation request from another agent.
+    
+    Args:
+        elicitation_id: ID of the elicitation to respond to
+        response_type: Type of response - "accept", "decline", or "cancel"
+        data: Response data (required if accepting, must match schema)
+        metadata: Optional metadata for the response
+    
+    Returns:
+        Success status of the response
+    """
+    session = await ensure_session()
+    if not session:
+        return json.dumps({"error": "Could not establish session with Bridge"})
+    
+    try:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as client:
+            async with client.post(
+                f"{BRIDGE_URL}/elicitation/respond",
+                json={
+                    "elicitation_id": elicitation_id,
+                    "responding_agent": session.get("agent_id", "mcp_server"),
+                    "response_type": response_type,
+                    "data": data,
+                    "metadata": metadata or {}
+                },
+                headers={"Authorization": f"Bearer {session.get('session_token')}"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return json.dumps(data, indent=2)
+                elif resp.status == 403:
+                    # Session expired or invalid
+                    global current_session
+                    current_session = None
+                    logger.warning("Session invalidated due to 403 response in respond_to_elicitation")
+                    return json.dumps({"error": "Session expired, please retry"})
+                else:
+                    error_data = await resp.text()
+                    return json.dumps({"error": f"Bridge returned status {resp.status}: {error_data}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 # Initialization
 async def initialize():
     """Initialize MCP server and check Bridge connection"""

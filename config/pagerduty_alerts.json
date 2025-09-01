@@ -1,0 +1,11 @@
+{
+  "service_id": "lighthouse-prod",
+  "alerts": [
+    {
+      "name": "FEATURE_PACK_0_P99 Latency High",
+      "condition": "p99_latency_milliseconds > 300",
+      "severity": "warning",
+      "escalation_policy": "performance-team"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+groups:
+- interval: 30s
+  name: lighthouse_elicitation
+  rules:
+  - alert: ElicitationP99LatencyHigh
+    annotations:
+      description: P99 latency is {{ $value }}ms, exceeding the 300ms target
+      summary: P99 latency exceeds 300ms target
+    expr: p99_latency_milliseconds > 300
+    for: 5m
+    labels:
+      component: elicitation
+      migration: FEATURE_PACK_0
+      severity: warning

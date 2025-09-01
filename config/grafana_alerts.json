@@ -1,0 +1,31 @@
+{
+  "dashboard_uid": "fp0-migration",
+  "alert_panels": [
+    {
+      "title": "P99 Latency Alert",
+      "type": "graph",
+      "alert": {
+        "name": "P99 Latency Threshold",
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [
+                300
+              ],
+              "type": "gt"
+            },
+            "query": {
+              "model": "p99_latency_milliseconds",
+              "params": [
+                "5m",
+                "now"
+              ]
+            }
+          }
+        ],
+        "frequency": "60s",
+        "message": "P99 latency exceeds 300ms threshold"
+      }
+    }
+  ]
+}

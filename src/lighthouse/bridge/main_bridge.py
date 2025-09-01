@@ -125,6 +125,11 @@ class LighthouseBridge:
             max_concurrent_sessions=self.config.get('max_concurrent_sessions', 3)
         )
         
+        # Elicitation manager (FEATURE_PACK_0)
+        # Initialize lazily in HTTP server when first used to avoid circular dependencies
+        self.elicitation_manager = None
+        self.elicitation_initialized = False
+        
         # Integration state
         self.is_running = False
         self.start_time: Optional[datetime] = None

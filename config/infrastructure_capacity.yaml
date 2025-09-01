@@ -1,0 +1,101 @@
+# Infrastructure Capacity Planning for FEATURE_PACK_0 Migration
+# Generated: Week -1 Pre-Migration
+# This configuration defines resource requirements for each migration phase
+
+version: "1.0.0"
+migration: "FEATURE_PACK_0"
+
+# Resource requirements per migration phase
+phase_requirements:
+  5_percent:
+    cpu_cores: 16
+    memory_gb: 64
+    database_connections: 100
+    event_store_iops: 5000
+    network_bandwidth_gbps: 1
+    storage_gb: 500
+    
+  25_percent:
+    cpu_cores: 40
+    memory_gb: 160
+    database_connections: 250
+    event_store_iops: 15000
+    network_bandwidth_gbps: 2.5
+    storage_gb: 1000
+    
+  50_percent:
+    cpu_cores: 80
+    memory_gb: 320
+    database_connections: 500
+    event_store_iops: 30000
+    network_bandwidth_gbps: 5
+    storage_gb: 2000
+    
+  100_percent:
+    cpu_cores: 160
+    memory_gb: 640
+    database_connections: 1000
+    event_store_iops: 60000
+    network_bandwidth_gbps: 10
+    storage_gb: 5000
+
+# Auto-scaling configuration
+auto_scaling:
+  horizontal_pod_autoscaler:
+    min_replicas: 5
+    max_replicas: 50
+    target_cpu_utilization: 70
+    target_memory_utilization: 80
+    scale_up_rate: 2  # Double replicas when scaling up
+    scale_down_delay_minutes: 10
+    
+  cluster_autoscaler:
+    min_nodes: 3
+    max_nodes: 20
+    scale_down_delay_minutes: 10
+    node_pools:
+      - name: general
+        machine_type: n2-standard-8
+        min_nodes: 2
+        max_nodes: 10
+      - name: memory_optimized
+        machine_type: n2-highmem-4
+        min_nodes: 1
+        max_nodes: 5
+      - name: compute_optimized
+        machine_type: n2-highcpu-16
+        min_nodes: 0
+        max_nodes: 5
+        
+  database_connections:
+    min: 100
+    max: 1000
+    scale_trigger_percent: 85
+    connection_pool_size: 20
+    max_idle_connections: 10
+    connection_timeout_seconds: 30
+
+# Resource monitoring thresholds
+monitoring_thresholds:
+  cpu_alert_percent: 80
+  memory_alert_percent: 85
+  disk_alert_percent: 90
+  database_connections_alert_percent: 90
+  event_store_queue_depth_alert: 1000
+  network_utilization_alert_percent: 80
+
+# Burst capacity configuration
+burst_capacity:
+  enabled: true
+  cpu_burst_multiplier: 1.5
+  memory_burst_multiplier: 1.25
+  duration_minutes: 30
+  cooldown_minutes: 60
+
+# Disaster recovery
+disaster_recovery:
+  backup_retention_days: 30
+  snapshot_frequency_hours: 6
+  multi_region_replication: true
+  rpo_minutes: 15  # Recovery Point Objective
+  rto_minutes: 30  # Recovery Time Objective

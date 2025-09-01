@@ -77,6 +77,9 @@ class EventType(str, Enum):
     # Snapshot events
     SNAPSHOT_CREATED = "snapshot_created"
     SNAPSHOT_RESTORED = "snapshot_restored"
+    
+    # Custom events for extensions
+    CUSTOM = "custom"  # For feature-specific events like elicitation
 
 
 class Event(BaseModel):

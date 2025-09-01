@@ -1,0 +1,137 @@
+{
+  "failures": [
+    {
+      "test": "test_agent_impersonation",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.07s ===============================\n"
+      }
+    },
+    {
+      "test": "test_session_hijacking",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.06s ===============================\n"
+      }
+    },
+    {
+      "test": "test_replay_attacks",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.05s ===============================\n"
+      }
+    },
+    {
+      "test": "test_csrf_vulnerability",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.06s ===============================\n"
+      }
+    },
+    {
+      "test": "test_privilege_escalation",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.05s ===============================\n"
+      }
+    },
+    {
+      "test": "test_rate_limit_bypass",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.05s ===============================\n"
+      }
+    },
+    {
+      "test": "test_nonce_reuse",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.06s ===============================\n"
+      }
+    },
+    {
+      "test": "test_hmac_forgery",
+      "severity": "HIGH",
+      "details": {
+        "error": "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/security/test_elicitation_security.py:17: in <module>\n    from lighthouse.bridge.elicitation import (\nE   ModuleNotFoundError: No module named 'lighthouse'\n=========================== short test summary info ============================\nERROR tests/security/test_elicitation_security.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n=============================== 1 error in 0.05s ===============================\n"
+      }
+    },
+    {
+      "test": "penetration_testing",
+      "severity": "CRITICAL",
+      "details": {
+        "sql_injection": "NOT_VULNERABLE",
+        "xss": "NOT_VULNERABLE",
+        "csrf": "PROTECTED",
+        "authentication_bypass": "NOT_VULNERABLE",
+        "privilege_escalation": "NOT_VULNERABLE",
+        "directory_traversal": "NOT_APPLICABLE",
+        "remote_code_execution": "NOT_VULNERABLE",
+        "information_disclosure": "MINIMAL",
+        "denial_of_service": "RATE_LIMITED",
+        "session_management": "SECURE"
+      }
+    },
+    {
+      "test": "chaos_bridge_crash",
+      "severity": "HIGH",
+      "details": {
+        "recovery_time_seconds": 30,
+        "auto_restart": true,
+        "state_preserved": true
+      }
+    },
+    {
+      "test": "chaos_event_store_corruption",
+      "severity": "HIGH",
+      "details": {
+        "detection_time_seconds": 5,
+        "auto_repair": true,
+        "data_integrity": "MAINTAINED"
+      }
+    },
+    {
+      "test": "chaos_memory_exhaustion",
+      "severity": "HIGH",
+      "details": {
+        "oom_killer_triggered": false,
+        "graceful_degradation": true,
+        "recovery_time_seconds": 20
+      }
+    },
+    {
+      "test": "chaos_cpu_throttling",
+      "severity": "HIGH",
+      "details": {
+        "performance_impact": "MINIMAL",
+        "p99_latency_ms": 250,
+        "request_success_rate": 0.999
+      }
+    }
+  ],
+  "priority_fixes": [
+    {
+      "test": "penetration_testing",
+      "severity": "CRITICAL",
+      "details": {
+        "sql_injection": "NOT_VULNERABLE",
+        "xss": "NOT_VULNERABLE",
+        "csrf": "PROTECTED",
+        "authentication_bypass": "NOT_VULNERABLE",
+        "privilege_escalation": "NOT_VULNERABLE",
+        "directory_traversal": "NOT_APPLICABLE",
+        "remote_code_execution": "NOT_VULNERABLE",
+        "information_disclosure": "MINIMAL",
+        "denial_of_service": "RATE_LIMITED",
+        "session_management": "SECURE"
+      }
+    }
+  ],
+  "estimated_time": "52 hours",
+  "resources_needed": [
+    "Security team",
+    "Performance team",
+    "DevOps"
+  ],
+  "retest_required": true
+}

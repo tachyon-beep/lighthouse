@@ -1,0 +1,274 @@
+# Production Monitoring Configuration for FEATURE_PACK_0
+# Connects to real monitoring systems for production deployment
+
+version: "1.0.0"
+environment: "production"
+
+# Prometheus Configuration
+prometheus:
+  enabled: true
+  endpoint: "http://localhost:9090"
+  scrape_interval: 15s
+  retention: 30d
+  
+  # Metrics to collect
+  metrics:
+    # Elicitation metrics
+    elicitation_requests_total:
+      type: counter
+      help: "Total number of elicitation requests"
+      labels: ["from_agent", "to_agent", "status"]
+    
+    elicitation_response_time_seconds:
+      type: histogram
+      help: "Elicitation response time in seconds"
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+      labels: ["agent_id", "response_type"]
+    
+    elicitation_active_count:
+      type: gauge
+      help: "Number of active elicitations"
+      labels: ["status"]
+    
+    # Security metrics
+    security_violations_total:
+      type: counter
+      help: "Total security violations"
+      labels: ["type", "severity", "agent_id"]
+    
+    rate_limit_violations_total:
+      type: counter
+      help: "Rate limit violations"
+      labels: ["agent_id", "limit_type"]
+    
+    # Performance metrics
+    p50_latency_milliseconds:
+      type: gauge
+      help: "P50 latency in milliseconds"
+    
+    p95_latency_milliseconds:
+      type: gauge
+      help: "P95 latency in milliseconds"
+    
+    p99_latency_milliseconds:
+      type: gauge
+      help: "P99 latency in milliseconds"
+    
+    # System metrics
+    event_store_writes_per_second:
+      type: gauge
+      help: "Event store write rate"
+    
+    database_connections_active:
+      type: gauge
+      help: "Active database connections"
+
+# Grafana Configuration
+grafana:
+  enabled: true
+  endpoint: "http://localhost:3000"
+  api_key: "${GRAFANA_API_KEY}"
+  organization: "lighthouse"
+  
+  # Dashboards
+  dashboards:
+    - name: "FEATURE_PACK_0 Migration"
+      uid: "fp0-migration"
+      panels:
+        - title: "Elicitation vs wait_for_messages"
+          type: "graph"
+          metrics: ["elicitation_response_time_seconds", "wait_for_messages_latency"]
+        
+        - title: "P99 Latency Tracking"
+          type: "stat"
+          metric: "p99_latency_milliseconds"
+          threshold: 300
+          
+        - title: "Security Violations"
+          type: "heatmap"
+          metric: "security_violations_total"
+          
+        - title: "Active Agents"
+          type: "gauge"
+          metric: "elicitation_active_count"
+    
+    - name: "Security Monitoring"
+      uid: "fp0-security"
+      panels:
+        - title: "Authentication Failures"
+          type: "counter"
+          metric: "security_violations_total{type='authentication'}"
+        
+        - title: "Rate Limit Violations"
+          type: "graph"
+          metric: "rate_limit_violations_total"
+        
+        - title: "Replay Attack Attempts"
+          type: "counter"
+          metric: "security_violations_total{type='replay_attack'}"
+
+# Alerting Configuration
+alerting:
+  # PagerDuty Integration
+  pagerduty:
+    enabled: true
+    api_key: "${PAGERDUTY_API_KEY}"
+    service_id: "lighthouse-prod"
+    
+    # Alert rules
+    alerts:
+      - name: "P99 Latency High"
+        condition: "p99_latency_milliseconds > 300"
+        severity: "warning"
+        escalation_policy: "performance-team"
+        
+      - name: "P99 Latency Critical"
+        condition: "p99_latency_milliseconds > 500"
+        severity: "critical"
+        escalation_policy: "on-call"
+        
+      - name: "Security Breach"
+        condition: "security_violations_total{severity='CRITICAL'} > 0"
+        severity: "critical"
+        escalation_policy: "security-team"
+        
+      - name: "Error Rate High"
+        condition: "rate(elicitation_requests_total{status='error'}[5m]) > 0.01"
+        severity: "warning"
+        escalation_policy: "on-call"
+        
+      - name: "System Down"
+        condition: "up{job='lighthouse-bridge'} == 0"
+        severity: "critical"
+        escalation_policy: "immediate"
+  
+  # Slack Integration
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channels:
+      default: "#lighthouse-alerts"
+      security: "#security-alerts"
+      performance: "#performance-alerts"
+    
+    # Notification rules
+    notifications:
+      - name: "Deployment Started"
+        channel: "default"
+        template: "🚀 FEATURE_PACK_0 deployment started: {{.percentage}}% rollout"
+        
+      - name: "Rollback Triggered"
+        channel: "default"
+        template: "⚠️ EMERGENCY ROLLBACK triggered: {{.reason}}"
+        
+      - name: "Performance Target Met"
+        channel: "performance"
+        template: "✅ P99 latency {{.value}}ms meets <300ms target"
+        
+      - name: "Security Violation"
+        channel: "security"
+        template: "🔒 Security violation detected: {{.type}} from {{.agent}}"
+
+# Logging Configuration
+logging:
+  # ELK Stack Integration
+  elasticsearch:
+    enabled: true
+    endpoint: "http://localhost:9200"
+    index_pattern: "lighthouse-*"
+    
+  # Log aggregation
+  logstash:
+    enabled: true
+    endpoint: "localhost:5514"
+    protocol: "tcp"
+    
+  # Structured logging
+  fields:
+    - name: "elicitation_id"
+      type: "keyword"
+    - name: "agent_id"
+      type: "keyword"
+    - name: "latency_ms"
+      type: "float"
+    - name: "security_event"
+      type: "boolean"
+    - name: "error_code"
+      type: "keyword"
+
+# Tracing Configuration
+tracing:
+  # Jaeger Integration
+  jaeger:
+    enabled: true
+    endpoint: "http://localhost:14268/api/traces"
+    service_name: "lighthouse-elicitation"
+    sampler_type: "probabilistic"
+    sampler_param: 0.1  # Sample 10% of traces
+    
+  # OpenTelemetry
+  opentelemetry:
+    enabled: true
+    endpoint: "localhost:4317"
+    protocol: "grpc"
+
+# Health Checks
+health_checks:
+  endpoints:
+    - name: "Bridge Health"
+      url: "http://localhost:8765/health"
+      interval: 30s
+      timeout: 5s
+      
+    - name: "Event Store Health"
+      url: "http://localhost:8766/health"
+      interval: 30s
+      timeout: 5s
+      
+    - name: "Elicitation Health"
+      url: "http://localhost:8765/elicitation/health"
+      interval: 30s
+      timeout: 5s
+
+# SLA Monitoring
+sla:
+  targets:
+    - name: "P99 Latency"
+      metric: "p99_latency_milliseconds"
+      target: 300
+      unit: "ms"
+      
+    - name: "Availability"
+      metric: "uptime"
+      target: 99.95
+      unit: "%"
+      
+    - name: "Error Rate"
+      metric: "error_rate"
+      target: 0.1
+      unit: "%"
+      
+    - name: "Message Delivery"
+      metric: "delivery_rate"
+      target: 99.5
+      unit: "%"
+
+# Export Configuration
+exporters:
+  # CloudWatch (AWS)
+  cloudwatch:
+    enabled: false
+    region: "us-west-2"
+    namespace: "Lighthouse/Production"
+    
+  # Datadog
+  datadog:
+    enabled: false
+    api_key: "${DATADOG_API_KEY}"
+    site: "datadoghq.com"
+    
+  # New Relic
+  newrelic:
+    enabled: false
+    license_key: "${NEW_RELIC_LICENSE_KEY}"
+    app_name: "Lighthouse-Elicitation"

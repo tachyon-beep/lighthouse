@@ -1,0 +1,15 @@
+{
+  "channels": {
+    "default": "#lighthouse-alerts",
+    "security": "#security-alerts",
+    "performance": "#performance-alerts"
+  },
+  "notifications": [
+    {
+      "name": "Deployment Started",
+      "channel": "#lighthouse-alerts",
+      "template": "\ud83d\ude80 FEATURE_PACK_0 deployment started: {{.percentage}}% rollout",
+      "enabled": true
+    }
+  ]
+}

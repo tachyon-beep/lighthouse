@@ -86,6 +86,32 @@ class BridgeStatusResponse(BaseModel):
     pending_validations: int
     uptime_seconds: float
 
+# Elicitation models (FEATURE_PACK_0)
+class ElicitationCreateRequest(BaseModel):
+    from_agent: str
+    to_agent: str
+    message: str
+    schema: Dict[str, Any]
+    timeout_seconds: int = 30
+    metadata: Optional[Dict[str, Any]] = None
+
+class ElicitationCreateResponse(BaseModel):
+    elicitation_id: str
+    status: str
+    expires_at: float
+    message: str = "Elicitation created successfully"
+
+class ElicitationRespondRequest(BaseModel):
+    elicitation_id: str
+    responding_agent: str
+    response_type: str  # accept, decline, cancel
+    data: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+class ElicitationPendingResponse(BaseModel):
+    elicitations: list[Dict[str, Any]]
+    count: int
+
 # Authentication middleware
 async def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
@@ -958,6 +984,182 @@ async def start_collaboration(
         }
     except Exception as e:
         logger.error(f"Failed to start collaboration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== ELICITATION ENDPOINTS (FEATURE_PACK_0) ====================
+
+@app.post("/elicitation/create", response_model=ElicitationCreateResponse)
+async def create_elicitation(
+    request: ElicitationCreateRequest,
+    auth_token: str = Depends(require_auth)
+):
+    """
+    Create a new elicitation request for structured agent-to-agent communication.
+    
+    This replaces wait_for_messages with immediate, schema-validated information exchange.
+    The target agent will receive the request and can respond with data matching the schema.
+    """
+    try:
+        # Initialize elicitation manager if not available
+        if not hasattr(bridge, 'elicitation_manager'):
+            # Create elicitation manager on first use
+            from lighthouse.bridge.elicitation import SecureElicitationManager
+            bridge.elicitation_manager = SecureElicitationManager(
+                event_store=bridge.event_store,
+                bridge_secret_key=bridge.config.get('secret_key', 'lighthouse_secret'),
+                session_validator=bridge.session_security
+            )
+            await bridge.elicitation_manager.initialize()
+            logger.info("Initialized SecureElicitationManager for FEATURE_PACK_0")
+        
+        # Create elicitation
+        elicitation_id = await bridge.elicitation_manager.create_elicitation(
+            from_agent=request.from_agent,
+            to_agent=request.to_agent,
+            message=request.message,
+            schema=request.schema,
+            timeout_seconds=request.timeout_seconds,
+            agent_token=auth_token
+        )
+        
+        return ElicitationCreateResponse(
+            elicitation_id=elicitation_id,
+            status="pending",
+            expires_at=time.time() + request.timeout_seconds
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create elicitation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/elicitation/pending", response_model=ElicitationPendingResponse)
+async def get_pending_elicitations(
+    agent_id: str,
+    auth_token: str = Depends(require_auth)
+):
+    """
+    Get pending elicitation requests for an agent.
+    
+    Returns all elicitation requests waiting for a response from the specified agent.
+    """
+    try:
+        if not hasattr(bridge, 'elicitation_manager'):
+            return ElicitationPendingResponse(elicitations=[], count=0)
+        
+        pending = await bridge.elicitation_manager.get_pending_elicitations(agent_id)
+        
+        return ElicitationPendingResponse(
+            elicitations=pending,
+            count=len(pending)
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get pending elicitations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/elicitation/respond")
+async def respond_to_elicitation(
+    request: ElicitationRespondRequest,
+    auth_token: str = Depends(require_auth)
+):
+    """
+    Respond to an elicitation request.
+    
+    Allows an agent to accept, decline, or cancel an elicitation request.
+    Response data must match the schema if accepting.
+    """
+    try:
+        if not hasattr(bridge, 'elicitation_manager'):
+            raise HTTPException(status_code=503, detail="Elicitation manager not initialized")
+        
+        success = await bridge.elicitation_manager.respond_to_elicitation(
+            elicitation_id=request.elicitation_id,
+            responding_agent=request.responding_agent,
+            response_type=request.response_type,
+            data=request.data,
+            agent_token=auth_token
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to respond to elicitation")
+        
+        return {
+            "status": "success",
+            "message": f"Elicitation {request.elicitation_id} {request.response_type}ed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to respond to elicitation: {e}")
+        if "UNAUTHORIZED" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        elif "RATE_LIMIT" in str(e):
+            raise HTTPException(status_code=429, detail=str(e))
+        else:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/elicitation/status/{elicitation_id}")
+async def get_elicitation_status(
+    elicitation_id: str,
+    auth_token: str = Depends(require_auth)
+):
+    """
+    Get the status of an elicitation request.
+    
+    Returns current status (pending, accepted, declined, cancelled, expired).
+    """
+    try:
+        if not hasattr(bridge, 'elicitation_manager'):
+            raise HTTPException(status_code=503, detail="Elicitation manager not initialized")
+        
+        status = await bridge.elicitation_manager.get_elicitation_status(elicitation_id)
+        
+        if status is None:
+            raise HTTPException(status_code=404, detail="Elicitation not found")
+        
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get elicitation status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/elicitation/metrics")
+async def get_elicitation_metrics(
+    auth_token: str = Depends(require_auth)
+):
+    """
+    Get elicitation system metrics.
+    
+    Returns performance and security metrics for the elicitation system.
+    """
+    try:
+        if not hasattr(bridge, 'elicitation_manager'):
+            return {"message": "Elicitation manager not initialized"}
+        
+        metrics = bridge.elicitation_manager.get_metrics()
+        
+        return {
+            "performance": {
+                "p50_latency_ms": metrics.p50_latency_ms,
+                "p95_latency_ms": metrics.p95_latency_ms,
+                "p99_latency_ms": metrics.p99_latency_ms,
+                "delivery_rate": metrics.delivery_rate,
+                "timeout_rate": metrics.timeout_rate
+            },
+            "security": {
+                "impersonation_attempts": metrics.impersonation_attempts,
+                "replay_attempts": metrics.replay_attempts,
+                "rate_limit_violations": metrics.rate_limit_violations
+            },
+            "activity": {
+                "active_elicitations": metrics.active_elicitations,
+                "pending_elicitations": metrics.pending_elicitations
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get elicitation metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # WebSocket for real-time communication
