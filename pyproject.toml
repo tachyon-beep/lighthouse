@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lighthouse"
 version = "1.0.0"  # Phase 1 Complete with Security
 description = "Multi-agent coordination platform with secure event-sourced foundation"
-authors = [{name = "Your Name", email = "your.email@example.com"}]
+authors = [{name = "Lighthouse Contributors", email = "lighthouse@example.com"}]
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
@@ -65,9 +65,9 @@ performance = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/lighthouse"
-Repository = "https://github.com/yourusername/lighthouse.git"  
-Issues = "https://github.com/yourusername/lighthouse/issues"
+Homepage = "https://github.com/tachyon-beep/lighthouse"
+Repository = "https://github.com/tachyon-beep/lighthouse.git"  
+Issues = "https://github.com/tachyon-beep/lighthouse/issues"
 
 [project.scripts]
 lighthouse = "lighthouse.server:main"  # Legacy MCP server

@@ -1,10 +1,6 @@
-# Lighthouse v1.0.0 - Multi-Agent Coordination Platform
+# Lighthouse - Multi-Agent Coordination Platform with Event-Sourced Foundation
 
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/tachyon-beep/lighthouse/releases)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-A production-ready multi-agent coordination platform featuring the MCP Elicitation Protocol with 1000x performance improvement over traditional polling. Built on event-sourcing architecture with enterprise-grade security.
+A comprehensive multi-agent coordination platform built on event-sourcing architecture with enterprise-grade security. Lighthouse provides both MCP (Model Context Protocol) server capabilities and a robust event store foundation for multi-agent system coordination.
 
 ## 🏗️ Architecture Overview
 

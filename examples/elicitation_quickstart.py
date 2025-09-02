@@ -13,8 +13,8 @@ from pathlib import Path
 # Add project to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from src.lighthouse.bridge.elicitation import OptimizedElicitationManager
-from src.lighthouse.event_store import EventStore
+from lighthouse.bridge.elicitation import OptimizedElicitationManager
+from lighthouse.event_store import EventStore
 
 
 async def main():

@@ -780,6 +780,85 @@ async def query_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Long-polling endpoint for waiting on new events
+@app.get("/event/wait")
+async def wait_for_events(
+    agent_id: str,
+    since_sequence: Optional[int] = None,
+    timeout_seconds: int = 60,
+    token: str = Depends(require_auth)
+):
+    """
+    Wait for new events with long-polling - returns early if events arrive.
+    Perfect for agent conversations to avoid fixed sleep delays.
+    Supports up to 300 seconds for experts waiting for work.
+    """
+    if not bridge:
+        raise HTTPException(status_code=503, detail="Bridge not initialized")
+    
+    try:
+        import asyncio
+        from datetime import datetime, timedelta
+        
+        start_time = datetime.now()
+        # Allow up to 300 seconds for long-running expert agents
+        timeout = min(timeout_seconds, 300)
+        end_time = start_time + timedelta(seconds=timeout)
+        
+        logger.info(f"Agent {agent_id} waiting for events (timeout: {timeout}s)")
+        
+        last_sequence = since_sequence or 0
+        
+        while datetime.now() < end_time:
+            # Check for new events
+            from lighthouse.event_store.models import EventQuery, EventFilter
+            
+            query = EventQuery(
+                filters=[EventFilter(field="source_agent", value=agent_id, operator="!=")],
+                limit=10,
+                offset=0
+            )
+            
+            events = []
+            try:
+                async for event in bridge.event_store.query(query, agent_id="http_server"):
+                    if event.sequence > last_sequence:
+                        events.append({
+                            "sequence": event.sequence,
+                            "event_type": event.event_type.value,
+                            "source_agent": event.source_agent,
+                            "timestamp": event.timestamp.isoformat(),
+                            "data": event.data
+                        })
+            except Exception as e:
+                logger.debug(f"Event query during wait: {e}")
+            
+            if events:
+                # New events found - return immediately
+                logger.info(f"Agent {agent_id} received {len(events)} new events")
+                return {
+                    "events": events,
+                    "count": len(events),
+                    "waited_seconds": (datetime.now() - start_time).total_seconds(),
+                    "status": "new_events"
+                }
+            
+            # No events yet, wait a bit before checking again
+            await asyncio.sleep(1)
+        
+        # Timeout reached with no new events
+        logger.info(f"Agent {agent_id} wait timeout after {timeout_seconds}s")
+        return {
+            "events": [],
+            "count": 0,
+            "waited_seconds": timeout_seconds,
+            "status": "timeout"
+        }
+        
+    except Exception as e:
+        logger.error(f"Wait for events failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# SECURITY FIX: Task dispatch now requires proper authentication (no auto-registration)
 @app.post("/task/dispatch")
 async def dispatch_task(
     request: Dict[str, Any],

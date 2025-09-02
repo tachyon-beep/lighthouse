@@ -469,6 +469,50 @@ async def lighthouse_health_check() -> str:
         "architecture": "MCP on host, Bridge in container"
     }, indent=2)
 
+@mcp.tool()
+async def lighthouse_wait_for_messages(
+    agent_id: str,
+    timeout_seconds: int = 60,
+    since_sequence: Optional[int] = None
+) -> str:
+    """
+    Wait for new messages/events from other agents with long-polling.
+    Returns immediately if new messages arrive, otherwise waits up to timeout_seconds.
+    Supports up to 300 seconds for expert agents waiting for work.
+    Perfect for avoiding fixed sleep delays in agent conversations.
+    """
+    session = await ensure_session()
+    if not session:
+        return json.dumps({"error": "Could not establish session with Bridge"})
+    
+    try:
+        # Allow up to 300 seconds for long-running expert agents
+        timeout = min(timeout_seconds, 300)
+        params = {
+            "agent_id": agent_id,
+            "timeout_seconds": timeout,
+        }
+        if since_sequence is not None:
+            params["since_sequence"] = since_sequence
+            
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout+10)
+        ) as client:
+            async with client.get(
+                f"{BRIDGE_URL}/event/wait",
+                params=params,
+                headers={"Authorization": f"Bearer {session.get('session_token')}"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return json.dumps(data, indent=2)
+                else:
+                    return json.dumps({"error": f"Bridge returned status {resp.status}"})
+    except asyncio.TimeoutError:
+        return json.dumps({"status": "timeout", "events": [], "count": 0})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 # ==================== ELICITATION TOOLS (FEATURE_PACK_0) ====================
 
 @mcp.tool()

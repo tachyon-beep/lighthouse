@@ -26,6 +26,7 @@ Performance Characteristics (Validated):
 """
 
 from .manager import SecureElicitationManager
+from .fast_manager import OptimizedElicitationManager
 from .events import (
     ElicitationEventType,
     ElicitationCreatedEvent,
@@ -47,6 +48,7 @@ from .models import (
 
 __all__ = [
     'SecureElicitationManager',
+    'OptimizedElicitationManager',
     'ElicitationEventType',
     'ElicitationCreatedEvent',
     'ElicitationRespondedEvent', 
