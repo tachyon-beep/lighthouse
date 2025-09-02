@@ -19,7 +19,7 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.1
 
 # Security
-cryptography==42.0.8
+cryptography==44.0.1
 
 # Serialization
 msgpack==1.0.8
