@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "auto_migrate": true,
+  "fallback_to_wait": false,
+  "log_migrations": true,
+  "compatibility_endpoints": [
+    "/wait_for_messages",
+    "/poll_messages"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "type": "deprecation_notice",
+  "timestamp": "2025-09-01T13:08:49.739993+00:00",
+  "title": "wait_for_messages Deprecation Notice",
+  "message": "wait_for_messages is deprecated in favor of elicitation API",
+  "impact": "1000x performance improvement available",
+  "timeline": {
+    "deprecation_start": "2025-09-01T13:08:49.739249+00:00",
+    "warning_period": "3 months",
+    "removal_date": "2026-02-28T13:08:49.739249+00:00"
+  },
+  "action_required": "Migrate to elicitation API",
+  "resources": [
+    "docs/MIGRATION_GUIDE.md",
+    "examples/elicitation_examples.py"
+  ]
+}

@@ -1,73 +1,24 @@
 {
-  "flags": {
-    "elicitation_enabled": {
-      "status": "percentage_rollout",
-      "description": "Enable MCP Elicitation protocol",
-      "rollout_percentage": 25,
-      "created_at": "2025-08-31T16:16:54.364539+00:00",
-      "updated_at": "2025-08-31T16:16:54.364868+00:00",
-      "emergency_rollback": false,
-      "dependencies": [],
-      "metrics": {
-        "enabled_count": 0,
-        "disabled_count": 1,
-        "error_count": 0
-      },
-      "rollback_at": "2025-08-31T16:16:54.364567+00:00"
-    },
-    "elicitation_security_enhanced": {
-      "status": "enabled",
-      "description": "Enhanced security features for elicitation",
-      "rollout_percentage": 100,
-      "created_at": "2025-08-31T16:16:54.364548+00:00",
-      "updated_at": "2025-08-31T16:16:54.364550+00:00",
-      "dependencies": [
-        "elicitation_enabled"
-      ]
-    },
-    "wait_for_messages_deprecated": {
-      "status": "disabled",
-      "description": "Mark wait_for_messages as deprecated",
-      "rollout_percentage": 0,
-      "created_at": "2025-08-31T16:16:54.364551+00:00",
-      "updated_at": "2025-08-31T16:16:54.364552+00:00",
-      "dependencies": [
-        "elicitation_enabled"
-      ]
-    },
-    "elicitation_performance_monitoring": {
-      "status": "enabled",
-      "description": "Enable detailed performance monitoring",
-      "rollout_percentage": 100,
-      "created_at": "2025-08-31T16:16:54.364553+00:00",
-      "updated_at": "2025-08-31T16:16:54.364554+00:00"
-    },
-    "elicitation_ab_test": {
-      "status": "disabled",
-      "description": "A/B test elicitation vs wait_for_messages",
-      "rollout_percentage": 0,
-      "test_groups": {
-        "control": "wait_for_messages",
-        "treatment": "elicitation"
-      },
-      "created_at": "2025-08-31T16:16:54.364556+00:00",
-      "updated_at": "2025-08-31T16:16:54.364557+00:00"
-    }
+  "elicitation": {
+    "enabled": true,
+    "rollout_percentage": 100,
+    "environments": [
+      "production",
+      "staging",
+      "development"
+    ],
+    "updated": "2025-09-01T13:08:49.739449+00:00"
   },
-  "canary_agents": [],
-  "history": [
-    {
-      "action": "emergency_rollback",
-      "flag": "elicitation_enabled",
-      "timestamp": "2025-08-31T16:16:54.364568+00:00"
-    },
-    {
-      "action": "set_rollout_percentage",
-      "flag": "elicitation_enabled",
-      "old_percentage": 0,
-      "new_percentage": 25,
-      "timestamp": "2025-08-31T16:16:54.364872+00:00"
-    }
-  ],
-  "saved_at": "2025-08-31T16:16:54.364885+00:00"
+  "wait_for_messages": {
+    "enabled": true,
+    "deprecated": true,
+    "deprecation_date": "2025-09-01T13:08:49.739249+00:00",
+    "removal_date": "2026-02-28T13:08:49.739249+00:00",
+    "show_warnings": true
+  },
+  "performance": {
+    "use_optimized_manager": true,
+    "enable_batching": true,
+    "max_batch_size": 100
+  }
 }
